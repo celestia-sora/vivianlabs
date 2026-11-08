@@ -26,9 +26,9 @@ Vivian is a character-first shy, polite, slightly awkward tsundere companion, no
 
 **Project:** Vivian AI Companion  
 **Stack:** Next.js 16.3.3 + React 19 + TypeScript + Tailwind CSS v4  
-**Architecture:** Shared Vivian backend/AI systems with separate Web, Desktop, iOS, and Android clients  
-**Database:** Supabase PostgreSQL (optional, gracefully degraded if unavailable)  
-**Deployment:** Vercel for Web; native mobile build/distribution is branch-specific  
+**Architecture:** Shared Vivian backend/AI systems with separate Web, Desktop, iOS, and Android clients; sign-in delegated to vivianAuth (Cloudflare Workers + D1)  
+**Database:** Supabase PostgreSQL for app data only (memory, chat history, scenes, voice prefs); sign-in identities live in vivianAuth D1  
+**Deployment:** Vercel for Web (`vivianlabs.vercel.app`); native mobile build/distribution is branch-specific  
 
 ### Active platform branches
 - `main` — Vivian Web App / production source of truth
@@ -93,10 +93,10 @@ import { Container } from "pixi-live2d-display";
 ### API Routes
 
 #### `/api/chat` — LLM Proxy
-- **Input:** `{ messages: ChatMessage[], userId?: string }`
+- **Input:** `{ messages: ChatMessage[], userId?: string, mode?: "greeting" }` (conversation/message IDs accepted for cloud history)
 - **Behavior:**
-  - Try Groq first for normal text chat
-  - Fall back to Gemini when configured
+  - Text chat: Try Groq first (`GROQ_MODEL`, default `qwen/qwen3.8-27b`), fall back to Gemini when configured (`GEMINI_MODEL`, default `gemini-2.5-flash`)
+  - Vision: Groq Qwen 3.8 27B only (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`). No Gemini fallback — a failed vision request errors instead of silently switching providers.
   - Detect search intents ("search", "news", "latest", etc.) → use Gemini + google_search tool
 - **Output:** `{ content: string, sources?: { title, url }[] }`
 - **Side Effects:**
@@ -110,9 +110,9 @@ import { Container } from "pixi-live2d-display";
 - **Graceful degradation:** Return empty arrays if Supabase unavailable
 
 #### `/api/stt` — Speech-to-Text
-- **Input:** FormData with audio file (wav, mp3, webm)
+- **Input:** FormData with audio file (wav, mp3, webm) + optional `language` (th/en/ja/ko/zh; otherwise auto)
 - **Output:** `{ text: string }`
-- **API:** ElevenLabs Scribe v2 with `language_code: "tha"`
+- **API:** ElevenLabs Scribe v2; `language_code` anchored to the selected UI language when provided
 
 #### `/api/tts` — Text-to-Speech
 - **Input:** `{ text: string }`
@@ -123,13 +123,17 @@ import { Container } from "pixi-live2d-display";
 
 **Required:**
 - `GROQ_API_KEY` — Primary LLM provider
+- `VIVIANAUTH_URL`, `VIVIAN_INTERNAL_TOKEN` — vivianAuth verification bridge (`/api/verify`); token must match vivianAuth's Cloudflare secret. Without these, `getAuthAccess` returns 503 (`AUTH_UNAVAILABLE`).
 
 **Optional but Important:**
-- `GEMINI_API_KEY` — Fallback LLM + vision and web search capability
+- `GEMINI_API_KEY` — Fallback LLM + web search capability (vision is Groq Qwen only)
+- `GROQ_MODEL` (default `qwen/qwen3.8-27b`), `GROQ_VISION_MODEL` (same default), `GEMINI_MODEL` (default `gemini-2.5-flash`)
 - `GROQ_MEMORY_MODEL` — Background memory extraction and conversation compression (default: `openai/gpt-oss-20b`)
 - `ELEVENLABS_API_KEY` — Speech-to-Text
 - `ELEVENLABS_VOICE_ID` — Text-to-Speech voice selection
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — Memory persistence
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — Memory/history/scene persistence (app data only, not auth)
+- `TYPESAFE_API_KEY` (alias `JEV_API_KEY`) — JEV decision layer
+- `DEV_BYPASS_LOGIN` — Local preview only (`true` + `NODE_ENV=development`); never honored in production
 
 ---
 
@@ -155,7 +159,7 @@ import { Container } from "pixi-live2d-display";
 - **Provider Logic:** Modify the provider blocks in `app/api/chat/route.ts` to adjust fallback order
 
 ### Implementing New Live2D Animations
-**Location:** `app/companion.tsx` (client component); `app/page.tsx` verifies authentication before rendering it.
+**Location:** `app/companion.tsx` (client component); `app/page.tsx` is an unauthenticated shell — the Companion gates on the bearer token (`lib/auth/fetch`) and `/login` forwards to vivianAuth.
 
 ```typescript
 // Set expression
@@ -294,11 +298,13 @@ model.setExpression(null);
 
 | File | Purpose | Edit Frequency |
 |------|---------|----------------|
-| `app/page.tsx` | Server-side authentication gate | Low |
+| `app/page.tsx` | Companion shell (client-side token gate) | Low |
 | `app/companion.tsx` | Main UI component (chat + Live2D) | High |
+| `app/login/page.tsx` | Hop shim: consumes `#token=` → forwards to vivianAuth | Low |
 | `app/api/chat/route.ts` | LLM routing logic | High |
 | `app/layout.tsx` | Root layout (Cubism Core loader) | Low |
 | `app/globals.css` | Styling | Medium |
+| `lib/auth/` | Bearer verify bridge (`getAuthAccess` → vivianAuth `/api/verify`) + client `authFetch` | Medium |
 | `lib/supabase-admin.ts` | Database client | Low |
 | `public/live2d/` | Live2D assets | Low |
 | `package.json` | Dependencies | Low |
@@ -330,11 +336,10 @@ This section is the current source of truth for continuing work. Read it before 
 - Product: Vivian Personal Project
 - Character: Vivian
 - Codename: Columbina
-- Production URL: https://vivian-chan.vercel.app
-- Repository: https://github.com/celestial-sora/ai-waifu
+- Production URL: https://vivianlabs.vercel.app
+- Repository: https://github.com/celestia-sora/vivian
+- Auth: https://github.com/celestia-sora/vivianAuth (`https://vivianauth.celestiasora.workers.dev`, Cloudflare Workers + D1)
 - Git branches: `main` (Web), `feature/desktop-pet-local` (Desktop), `feature/native-ios` (iOS), `feature/native-android` (Android)
-- Latest committed version: `6808570` (`feat: auto-capture camera frame on vision queries, prioritize Gemini for image recognition, and scrub meta system phrases`)
-- Latest production deployment: `Ready in 41s (https://vivian-chan.vercel.app)`
 
 ### Actual runtime flow
 
@@ -344,7 +349,7 @@ This section is the current source of truth for continuing work. Read it before 
 3. The transcript is shown in the STT preview bubble and auto-submitted to `POST /api/chat`.
 4. `/api/chat` loads durable memory from Supabase, then calls Groq as the primary LLM for normal text chat.
 5. If Groq fails or times out, `/api/chat` falls back to Gemini when configured.
-6. Provider requests have a 25-second timeout; the browser chat request has a 35-second timeout.
+6. Provider requests use short timeouts (primary Groq 45s within a 60s route limit; vision/search share the same pattern); the browser chat request has a 35-second timeout.
 7. The tagged response is sent to `POST /api/tts`; ElevenLabs v4 uses inline audio tags across categories as delivery metadata. Emotion tags start their sentence; other tags precede the segment they guide.
 8. The UI waits for audio playback to start, then shows Vivian's response bubble so text and speech are synchronized.
 9. Audio amplitude drives `ParamMouthOpenY`; the reply also drives Live2D expression/motion mapping.
@@ -379,12 +384,12 @@ This section is the current source of truth for continuing work. Read it before 
 ### Provider and security rules
 
 - Never print, commit, or place API keys in this file, Notion, Trello, client code, or `NEXT_PUBLIC_*` variables.
-- Provider secrets belong only in Vercel environment variables.
-- Web access now requires Supabase Auth with confirmed email, restricted to `suphloeksangko@gmail.com` and `duckchan690@gmail.com`. Keep the allowlist server-side and guard every API independently of Proxy. Never trust client-supplied identity or `user_metadata` for authorization.
-- `app/page.tsx` is the server-side gate; `app/companion.tsx` retains the existing client UI. Google OAuth uses `/auth/callback`; Settings provides POST `/auth/signout`. Configure public Supabase URL/publishable key and the Google provider before live login testing.
-- Both authorized accounts retain the existing shared `default` memory/relationship identity. Do not widen access, separate user data, add a home server, Python backend, self-hosted LLM, or GPU infrastructure unless explicitly requested.
+- Provider secrets belong only in Vercel environment variables. vivianAuth secrets (Google, Resend, `VIVIAN_INTERNAL_TOKEN`) belong only in Cloudflare Workers secrets.
+- Web access requires a verified D1 identity via vivianAuth `POST /api/verify`: bearer token + `X-Internal-Token` shared with vivianAuth. Confirmed means a non-anonymous user with a verified email (`isAllowedUser`). Guard every API with `requireApiAccess` in `lib/auth/server.ts`. Never trust client-supplied identity or `user_metadata` for authorization.
+- Sign-in flow: vivianAuth → `#token=` fragment → `localStorage vivian_auth_token` → `Authorization: Bearer` (`authFetch`) → server verify. Logout revokes via vivianAuth `POST /api/logout`. `app/page.tsx` is a shell; `app/companion.tsx` gates client-side; `app/login/page.tsx` is the hop shim. Legacy Supabase Auth config is unused for login (only Realtime config reads `NEXT_PUBLIC_SUPABASE_*`).
+- All confirmed D1 accounts retain the existing shared `default` memory/relationship identity. Scene/storage rows store D1 UUIDs in plain `user_id` columns (FKs to `auth.users` dropped by `20261107120000_drop_auth_fk.sql`; RLS + `eq("user_id",…)` scoping unchanged). Do not widen access, separate user data, add a home server, Python backend, self-hosted LLM, or GPU infrastructure unless explicitly requested.
 - TTS and Live2D failures must never prevent text chat from completing.
-- Search and vision requests use Gemini; normal text chat uses Groq first, then Gemini as fallback.
+- Text chat uses Groq first, then Gemini as fallback; vision uses Groq Qwen 3.8 27B only (no Gemini fallback); search uses Gemini + `google_search`. STT (`/api/stt`) honors the selected UI language; TTS uses ElevenLabs `eleven_v4` Text to Dialogue.
 
 ### Safe continuation workflow
 

@@ -358,13 +358,16 @@ test("chat executes a semantic time decision even without an existing time regex
   assert.match(fixture.calls.find((call) => call.kind === "groq").body.messages[0].content, /Asia\/Bangkok/);
 });
 
-test("chat image input forces Gemini even when JEV says vision is irrelevant", async () => {
+test("chat image input forces Qwen vision even when JEV says vision is irrelevant", async () => {
   const fixture = chatFixture({ values: { needs_vision: 0 } });
   const image = `data:image/jpeg;base64,${"a".repeat(80)}`;
   const response = await fixture.post("What is this?", { image });
   assert.equal(response.status, 200);
-  const request = fixture.calls.find((call) => call.kind === "gemini").body;
-  assert.equal(request.contents[0].parts[0].inlineData.data, "a".repeat(80));
+  const request = fixture.calls.find((call) => call.kind === "groq").body;
+  assert.equal(request.model, "qwen/qwen3.8-27b");
+  assert.equal(request.messages[0].content[1].type, "image_url");
+  assert.equal(request.messages[0].content[1].image_url.url, image);
+  assert.equal(fixture.calls.some((call) => call.kind === "gemini"), false);
   assert.equal(JSON.parse(fixture.calls.find((call) => call.kind === "jev").body.state).hasImage, true);
   assert.doesNotMatch(fixture.calls.find((call) => call.kind === "jev").body.state, /data:image/);
 });
