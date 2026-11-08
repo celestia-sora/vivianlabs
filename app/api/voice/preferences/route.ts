@@ -7,7 +7,8 @@ import {
 } from "@/lib/voice-preferences";
 
 const headers = { "Cache-Control": "private, no-store" };
-const columns = "voice_id,speech_language";
+const columns = "voice_id,speech_language,speaking_speed";
+const columnsFallback = "speech_language,speaking_speed";
 
 export async function preferences(request: Request, write: boolean): Promise<Response> {
   const denied = await requireApiAccess(request);
@@ -53,8 +54,8 @@ export async function preferences(request: Request, write: boolean): Promise<Res
       const fallbackRow = { ...row };
       delete fallbackRow.voice_id;
       result = write
-        ? await db.from("vivian_voice_preferences").upsert(fallbackRow, { onConflict: "id" }).select("speech_language").single()
-        : await db.from("vivian_voice_preferences").select("speech_language").eq("id", "global").maybeSingle();
+        ? await db.from("vivian_voice_preferences").upsert(fallbackRow, { onConflict: "id" }).select(columnsFallback).single()
+        : await db.from("vivian_voice_preferences").select(columnsFallback).eq("id", "global").maybeSingle();
     }
 
     const savedVoiceId = typeof result.data?.voice_id === "string" && result.data.voice_id
@@ -65,12 +66,20 @@ export async function preferences(request: Request, write: boolean): Promise<Res
       ? result.data.speech_language
       : (language ?? DEFAULT_SPEECH_LANGUAGE);
 
+    const savedSpeed = typeof result.data?.speaking_speed === "number"
+      ? result.data.speaking_speed
+      : undefined;
+
     return Response.json({
       voiceId: savedVoiceId,
       defaultVoiceId: defaultEnvVoiceId,
       speechLanguage: savedLang,
+      ...(savedSpeed !== undefined ? { speakingSpeed: savedSpeed } : {}),
     }, { headers });
   } catch {
+    if (write) {
+      return Response.json({ error: "Could not reach database" }, { status: 503, headers });
+    }
     return Response.json({
       voiceId: voiceId ?? defaultEnvVoiceId,
       defaultVoiceId: defaultEnvVoiceId,

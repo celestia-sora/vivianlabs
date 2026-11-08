@@ -33,6 +33,8 @@ const companion = load("../lib/companion.ts");
 const story = load("../lib/vivian-story.ts");
 const dialogue = load("../lib/vivian-dialogue.ts");
 const persona = load("../lib/vivian-persona.ts");
+const recall = load("../lib/memory-recall.ts");
+const embeddings = load("../lib/memory-embeddings.ts");
 const keys = ["needs_current_information", "needs_memory", "recalls_memory", "needs_vision", "needs_time", "needs_weather", "needs_calculator", "needs_integrations", "supportive_response", "explanatory_response"];
 function answers(values = {}) {
   return { answers: Object.fromEntries(keys.map((key) => [key, { type: "noul", noul: values[key] ?? (key === "needs_memory" ? 0.5 : 0.01) }])) };
@@ -247,6 +249,8 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/vivian-dialogue": dialogue,
     "@/lib/vivian-persona": persona,
     "@/lib/speech": load("../lib/speech.ts"),
+    "@/lib/memory-recall": recall,
+    "@/lib/memory-embeddings": embeddings,
     "@/lib/companion-store": { loadCompanionState: async () => { calls.push({ kind: "state" }); return companion.defaultCompanionState(); }, saveCompanionState: () => assert.fail("Background writes must not run in fixtures") },
     "@/lib/supabase-admin": { getSupabaseAdmin() {
       return { from(table) {
@@ -288,8 +292,8 @@ test("chat integrates a single JEV pass; state starts in parallel; main LLM rece
   const prompt = fixture.calls.find((call) => call.kind === "groq").body.messages[0].content;
   assert.match(prompt, /Vivian/); assert.match(prompt, /Likes tea/);
   assert.ok(prompt.startsWith(persona.vivianPersonaPrompt));
-  assert.match(prompt, /shy, polite, slightly awkward tsundere manner/);
-  assert.match(prompt, /draw from all ElevenLabs audio-tag categories when useful/);
+  assert.match(prompt, /shy, polite, slightly awkward tsundere companion/);
+  assert.match(prompt, /draw from all five categories/);
   assert.equal(prompt.includes(dialogue.VIVIAN_DIALOGUE_EXAMPLE), false);
   assert.equal(fixture.background.length, 1);
 });
@@ -403,13 +407,41 @@ test("JEV works without Gemini and normal text retains Groq → Gemini fallback"
 });
 
 test("Groq quota or missing model falls back to Gemini without probing other Groq models", async () => {
-  for (const status of [429, 404]) {
-    const fixture = chatFixture({ groqReply: () => new Response("unavailable", { status }) });
-    const response = await fixture.post();
-    assert.equal(response.status, 200);
-    assert.deepEqual(fixture.calls.filter((call) => ["groq", "gemini"].includes(call.kind)).map((call) => call.kind), ["groq", "gemini"]);
-    assert.equal(fixture.calls.find((call) => call.kind === "groq").body.model, "qwen/qwen3.8-27b");
-  }
+  const fixture = chatFixture({ groqReply: () => new Response("unavailable", { status: 404 }) });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.deepEqual(fixture.calls.filter((call) => ["groq", "gemini"].includes(call.kind)).map((call) => call.kind), ["groq", "gemini"]);
+  assert.equal(fixture.calls.find((call) => call.kind === "groq").body.model, "qwen/qwen3.8-27b");
+});
+
+test("Groq 429 is retried once after its reset window before any fallback", async () => {
+  let groqCalls = 0;
+  const fixture = chatFixture({
+    groqReply: () => {
+      groqCalls += 1;
+      if (groqCalls === 1) {
+        return new Response("rate limited", { status: 429, headers: { "retry-after": "0" } });
+      }
+      return Response.json({ choices: [{ message: { content: "Vivian fixture reply" } }] });
+    },
+  });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, "Vivian fixture reply");
+  assert.equal(fixture.calls.filter((call) => call.kind === "groq").length, 2);
+  assert.equal(fixture.calls.some((call) => call.kind === "gemini"), false);
+});
+
+test("Groq 429 that persists after the retry still falls through to Gemini", async () => {
+  const fixture = chatFixture({
+    groqReply: () => new Response("rate limited", { status: 429, headers: { "retry-after": "0" } }),
+  });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    fixture.calls.filter((call) => ["groq", "gemini"].includes(call.kind)).map((call) => call.kind),
+    ["groq", "groq", "gemini"]
+  );
 });
 
 test("fresh greetings request only 120 output tokens from Groq", async () => {
@@ -604,9 +636,9 @@ test("tsundere persona and latest custom instructions reach all dialogue provide
     const body=fixture.calls.find(call=>call.kind===provider).body;
     const prompt=provider==="gemini" ? body.systemInstruction.parts[0].text : body.messages[0].content;
     assert.ok(prompt.startsWith(persona.vivianPersonaPrompt));
-    assert.match(prompt,/# Vivian — shy, polite tsundere companion/);
+    assert.match(prompt,/# Vivian — shy, polite, slightly awkward tsundere companion/);
     assert.match(prompt,/ตอบเป็น ภาษาไทย/);
-    assert.match(prompt,/คำถามเกี่ยวกับตัว Vivian/);
+    assert.match(prompt,/Questions about Vivian's own identity/);
     assert.match(prompt,/three or four genuine follow-up turns/);
     assert.match(prompt,/LANGUAGE LOCK — FINAL RULE: Reply only in ภาษาไทย \(Thai\)/);
     assert.match(prompt, new RegExp(`${customInstructions}[\\s\\S]*LANGUAGE LOCK — FINAL RULE`));
@@ -635,7 +667,7 @@ test("custom instructions are bounded; empty preferences still get the persisten
   for(const customInstructions of ["", "x".repeat(2100)]) {
     const fixture=chatFixture(); await fixture.post("วันนี้เหนื่อย",{customInstructions});
     const prompt=fixture.calls.find(call=>call.kind==="groq").body.messages[0].content;
-    assert.match(prompt,/# Vivian — shy, polite tsundere companion/);
+    assert.match(prompt,/# Vivian — shy, polite, slightly awkward tsundere companion/);
     if(customInstructions) {assert.match(prompt,new RegExp("x{1200}[\\s\\S]*LANGUAGE LOCK"));assert.equal(prompt.includes("x".repeat(1201)),false);}
     else assert.doesNotMatch(prompt,/Conversation preferences for this turn/);
     assert.doesNotMatch(prompt,/ตานี้ถูกถามชื่อ/);
@@ -651,7 +683,7 @@ test("self-question persistence reaches the provider as actual separate turns", 
     const turns=fixture.calls.find(call=>call.kind==="groq").body.messages;
     assert.equal(turns.filter(turn=>turn.role==="user").length,count+1);
     assert.match(turns[0].content,/Questions about Vivian's own identity/);
-    assert.match(turns[0].content,/Count only actual turns/);
+    assert.match(turns[0].content,/count only actual turns/);
     assert.match(turns[0].content,/new topic starts over/);
     if(count<followups.length)messages.push({role:"assistant",content:"ไม่บอกหรอก"},{role:"user",content:followups[count]});
   }

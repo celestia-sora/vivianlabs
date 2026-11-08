@@ -12,11 +12,14 @@ import { scheduleBackgroundWork } from "@/lib/startup-background";
 import { readChatResponse } from "@/lib/chat-stream";
 import { startTiming, finishTiming, cancelTiming, type LocalTiming } from "@/lib/performance";
 import { shouldPauseModelStartup, clearModelLoadState } from "@/lib/model-startup";
+import { stepSimulation, easeDisplayed, desiredUploadPercent } from "@/lib/upload-progress";
 import { singleFlightModel, preloadModelPackages } from "@/lib/model-preload";
 import { subscribeModelLibrary } from "@/lib/model-library-realtime";
 import { useConversationHistory } from "@/lib/use-conversation-history";
 import { historyMessage, HISTORY_CACHE_KEY, type HistoryMessage, type HistoryConversation } from "@/lib/chat-history";
+import { deleteCloudHistory } from "@/lib/chat-history-client";
 import { authFetch } from "@/lib/auth/fetch";
+import { speechText } from "@/lib/speech";
 import { decayCompanionState, type CompanionState, defaultCompanionState, normalizeMood, moodLabel, type Mood } from "@/lib/companion";
 import { detectLive2DEmotion, resolveLive2DExpression, resolveLive2DMotion } from "@/lib/live2d-emotion";
 import { createExpressionStack, loadExpressionParameterSets, SAVED_EXPRESSION_STACK_FILE, SAVED_EXPRESSION_STACK_NAME } from "@/lib/live2d-expression-stack";
@@ -265,6 +268,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const [greetingTrigger, setGreetingTrigger] = useState(0);
   const activeConversationRef = useRef("daily-talk");
   const [conversationSearch, setConversationSearch] = useState("");
+  const [previewConversationId, setPreviewConversationId] = useState<string | null>(null);
   const [characterTab, setCharacterTab] = useState<"outfit" | "expression" | "pose">("outfit");
   const [languageOpen, setLanguageOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -277,6 +281,12 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const [modelSelectionResolved, setModelSelectionResolved] = useState(false);
   const [modelImporting, setModelImporting] = useState(false);
   const [modelImportProgress, setModelImportProgress] = useState<{ label: string; percent: number | null } | null>(null);
+  const [displayedImportPercent, setDisplayedImportPercent] = useState<number | null>(null);
+  const importProgressRef = useRef<{ label: string; percent: number | null } | null>(null);
+  importProgressRef.current = modelImportProgress;
+  const displayedImportRef = useRef(0);
+  const simulatedImportRef = useRef(0);
+  const lastImportLabelRef = useRef<string | null>(null);
   const [modelUploadKey, setModelUploadKey] = useState(0);
   const [modelStatus, setModelStatus] = useState<"empty" | "loading" | "ready" | "error">("empty");
   const [startupModelPending, setStartupModelPending] = useState(false);
@@ -287,6 +297,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const modelPreloadAbortRef = useRef<AbortController | null>(null);
   const cloudLibraryRef = useRef<CloudLibrary | null>(null);
   cloudLibraryRef.current = cloudLibrary;
+  const live2dBusyRef = useRef(false);
   const [modelPreviews, setModelPreviews] = useState<Record<string, string>>({});
   const [pendingModelId, setPendingModelId] = useState<string | null>(null);
   const snapshotMapRef = useRef<Promise<Map<string, Blob>> | null>(null);
@@ -315,6 +326,71 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   );
   const modelCarouselIndex = Math.max(0, modelCarouselEntries.findIndex(({ model }) => model.id === (pendingModelId ?? activeModelId)));
   const live2dBusy = startupModelPending || modelSwitchPending || modelStatus === "loading";
+  live2dBusyRef.current = live2dBusy;
+
+  // Ease-out / asymptotic upload bar: the displayed value always moves
+  // toward a simulation that starts fast and saturates below 100% until the
+  // real step finishes. Each import stage resets the curve.
+  // State updates are throttled (~12fps + only on change) so the main
+  // thread stays responsive while the bar is visible.
+  useEffect(() => {
+    if (!modelImporting) {
+      displayedImportRef.current = 0;
+      simulatedImportRef.current = 0;
+      lastImportLabelRef.current = null;
+      return;
+    }
+    const reduced = typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf: number | undefined;
+    let lastTick = 0;
+    let lastPaint = 0;
+    let lastSet = -1;
+    const tick = (now: number) => {
+      if (!lastTick) lastTick = now;
+      const dt = Math.min(100, now - lastTick);
+      lastTick = now;
+      const current = importProgressRef.current;
+      if (reduced) {
+        const next = current?.percent ?? null;
+        if (next !== lastSet) { lastSet = next ?? -1; setDisplayedImportPercent(next); }
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      if (current && current.label !== lastImportLabelRef.current) {
+        lastImportLabelRef.current = current.label;
+        simulatedImportRef.current = 0;
+        displayedImportRef.current = 0;
+      }
+      simulatedImportRef.current = stepSimulation(simulatedImportRef.current, dt);
+      const desired = desiredUploadPercent(simulatedImportRef.current, current?.percent ?? null);
+      displayedImportRef.current = easeDisplayed(displayedImportRef.current, desired, dt);
+      if (now - lastPaint >= 80) {
+        lastPaint = now;
+        const rounded = Math.round(displayedImportRef.current);
+        if (rounded !== lastSet) { lastSet = rounded; setDisplayedImportPercent(rounded); }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      if (raf !== undefined) cancelAnimationFrame(raf);
+    };
+  }, [modelImporting]);
+
+  // Watchdog: never let the full-screen preloader lock the UI forever.
+  // If a model load stalls, surface an error so chat/scroll work again.
+  useEffect(() => {
+    if (!live2dBusy) return;
+    const timer = window.setTimeout(() => {
+      if (!live2dBusyRef.current) return;
+      setModelStatus("error");
+      setStartupModelPending(false);
+      setModelSwitchPending(false);
+      setModelNotice((notice) => notice ?? "Model is taking longer than expected. It will keep loading in the background — you can chat meanwhile.");
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [live2dBusy]);
   const modelCarouselItems: CoverflowCarouselItem[] = useMemo(() => modelCarouselEntries.map(({ pack, model }) => {
     const isFocused = model.id === (pendingModelId ?? activeModelId);
     let badge: CoverflowCarouselItem["badge"];
@@ -397,7 +473,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     void preloadLive2DModules().catch(() => {});
     const localRequest = loadModelCatalog().catch(() => [] as ModelPackage[]);
     let cancelCloudStart: (() => void) | undefined;
-    let cancelPreload: (() => void) | undefined;
     const cloudRequest = localRequest.then((local) => new Promise<CloudLibrary | null>((resolve) => {
       const start = () => {
         if (controller.signal.aborted) { resolve(null); return; }
@@ -466,19 +541,12 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       if (selected && !startupModelResolvedRef.current) setStartupModelPending(true);
       setModelSelectionResolved(true);
       refreshSnapshots(allPackages);
-      if (cloud.models.length) {
-        const preloadController = new AbortController();
-        modelPreloadAbortRef.current?.abort();
-        modelPreloadAbortRef.current = preloadController;
-        cancelPreload = scheduleBackgroundWork(() => {
-          void preloadModelPackages(allPackages.filter((pack) => cloud.models.some((model) => model.id === pack.id)), globalSelection ?? selected,
-            (pack, signal) => preloadPackage(pack, cloud, signal), preloadController.signal);
-        }, 1500);
-      }
+      // Background preload is deferred until the selected model reaches
+      // first frame (modelStatus === "ready"). See the priority effect below.
     })().catch(() => {
       if (!cancelled) setModelNotice("Model storage is unavailable. Please try again.");
     }).finally(() => { if (!cancelled) { setModelSelectionResolved(true); setModelsReady(true); } });
-    return () => { cancelled = true; cancelCloudStart?.(); cancelPreload?.(); modelPreloadAbortRef.current?.abort(); controller.abort(); };
+    return () => { cancelled = true; cancelCloudStart?.(); modelPreloadAbortRef.current?.abort(); controller.abort(); };
   }, [accountId]);
 
   useEffect(() => {
@@ -490,6 +558,22 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   useEffect(() => {
     if (pendingModelId && pendingModelId === activeModelId) setPendingModelId(null);
   }, [activeModelId, pendingModelId]);
+
+  // Priority: the selected model owns initialization until first frame
+  // (modelStatus === "ready"). Background preloading for other packages
+  // starts only after that point and pauses immediately on any new load.
+  useEffect(() => {
+    if (modelStatus !== "ready" || !activeModelId) {
+      stopBackgroundPreload();
+      return;
+    }
+    startBackgroundPreload(modelPackages, activeModelId, cloudLibrary ?? modelCloudRequestRef.current);
+    return () => {
+      // Restart when packages/cloud change so newly synced models join the
+      // queue; abort on unmount or when leaving the ready state.
+      stopBackgroundPreload();
+    };
+  }, [modelStatus, activeModelId, modelPackages, cloudLibrary]);
 
   useEffect(() => {
     let disposed = false;
@@ -508,12 +592,9 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
             for (const model of cloud.models) if (!merged.some((pack) => pack.id === model.id)) merged.push(cloudModelPlaceholder(model));
             return merged;
           });
-          modelPreloadAbortRef.current?.abort();
-          const preloadController = new AbortController();
-          modelPreloadAbortRef.current = preloadController;
+          // Priority queue re-runs from the ready-effect after this merge;
+          // do not start background loads while the active model is busy.
           refreshSnapshots(cloud.models.map(cloudModelPlaceholder));
-          void preloadModelPackages(cloud.models.map(cloudModelPlaceholder), cloud.preference?.modelId ?? null,
-            (pack, signal) => preloadPackage(pack, cloud, signal), preloadController.signal);
           // Deliberately do not change activeModelId here; other tabs pick this on reload.
         })();
       }, 400);
@@ -624,8 +705,35 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     });
   }
 
+  function stopBackgroundPreload() {
+    modelPreloadAbortRef.current?.abort();
+    modelPreloadAbortRef.current = null;
+  }
+
+  function startBackgroundPreload(
+    packs: ModelPackage[],
+    selectedId: string | null,
+    cloud: CloudLibrary | Promise<CloudLibrary | null> | null,
+  ) {
+    stopBackgroundPreload();
+    if (packs.length === 0) return;
+    const controller = new AbortController();
+    modelPreloadAbortRef.current = controller;
+    void preloadModelPackages(
+      packs,
+      selectedId,
+      (pack, signal) => preloadPackage(pack, cloud, signal),
+      controller.signal,
+      { isActiveBusy: () => live2dBusyRef.current },
+    ).catch(() => {
+      // Individual package failures are handled inside the queue; a
+      // background-only failure must never affect the active model/chat.
+    });
+  }
+
   async function importModels(files: File[]) {
     if (modelImporting || !files.length) return;
+    stopBackgroundPreload();
     startupModelResolvedRef.current = true;
     setStartupModelPending(false);
     setModelImporting(true);
@@ -691,6 +799,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
 
   async function chooseModel(id: string) {
     if (modelImporting) return;
+    stopBackgroundPreload();
     startupModelResolvedRef.current = true;
     setStartupModelPending(false);
     const pack = modelPackages.find((entry) => entry.models.some((model) => model.id === id));
@@ -729,6 +838,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
 
   async function removeActiveModel() {
     if (!activePackage || modelImporting) return;
+    stopBackgroundPreload();
     setModelImporting(true);
     try {
       if (cloudLibrary?.models.some((model) => model.id === activePackage.id)) {
@@ -942,12 +1052,14 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
 
   useEffect(() => {
     if (!preferencesReady || !modelsReady || graphicsLost || modelPaused) return;
+    stopBackgroundPreload();
     setActiveExpression(null);
     setActiveMotion(null);
     if (!activeModel || !activePackage) {
       modelPresentationRef.current?.dispose(); modelPresentationRef.current = null;
       modelRef.current = null; modelRestStateRef.current = null;
-      setModelStatus("empty"); setModelSwitchPending(false); return;
+      setModelStatus("empty"); setModelSwitchPending(false);
+      startupModelResolvedRef.current = true; setStartupModelPending(false); return;
     }
     // Restore this model's saved drag position/zoom before the first frame.
     modelTransformRef.current = loadModelTransform(activeModel.id);
@@ -2292,6 +2404,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   function openPanel(next: Panel) {
     panelRef.current = next;
     sidebarOpenRef.current = true;
+    if (next !== "conversations") setPreviewConversationId(null);
     try { window.sessionStorage.setItem("vivian-open-panel", next); } catch { /* Storage restrictions do not block navigation. */ }
     setPanel(next);
     setSidebarOpen(true);
@@ -2311,6 +2424,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   function closeMenu() {
     panelRef.current = null;
     sidebarOpenRef.current = false;
+    setPreviewConversationId(null);
     try { window.sessionStorage.removeItem("vivian-open-panel"); } catch { /* Ignore unavailable storage. */ }
     setPanel(null);
     setSidebarOpen(false);
@@ -2360,6 +2474,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }
   function newConversation() {
     if (sending || resettingRef.current || !history.ready) return;
+    setPreviewConversationId(null);
     setErrorNotice(null);
     greetingGenerationRef.current += 1;
     greetingRequestRef.current?.abort();
@@ -2371,6 +2486,18 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     setMessages([{ from: "vivian", text: GREETING_PENDING }]);
     setGreetingTrigger((value) => value + 1);
     closeMenu();
+  }
+  async function deleteConversation(id: string) {
+    if (sending || resettingRef.current) return;
+    setErrorNotice(null);
+    await history.pause();
+    try {
+      await deleteCloudHistory(id).catch(() => null);
+      history.removeConversation(id);
+    } finally {
+      history.resume();
+    }
+    if (previewConversationId === id) setPreviewConversationId(null);
   }
   const navigation: Array<{ key: Panel; label: string; icon: IconName }> = [
     { key: "conversations", label: "Conversations", icon: "message" },
@@ -2597,19 +2724,59 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       <div className="floating-workspace menu-window">
         <section className="floating-panel" role="dialog" aria-modal="true" aria-label={panel ? navigation.find((item) => item.key === panel)?.label : "Vivian menu"}>
           <div className="floating-panel-head">{panel && <button className="settings-back" type="button" onClick={backToNavigation} aria-label="Back to menu"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>}<div><small>{panel ? `VIVIAN / ${panel.toUpperCase()}` : "VIVIAN / MENU"}</small><h2>{panel ? navigation.find((item) => item.key === panel)?.label : "Menu"}</h2></div><button type="button" onClick={closeNavigation} aria-label="Close menu"><Icon name="close" size={18}/></button></div>
-          {modelImporting && panel === "character" && <div className={`floating-panel-loadbar${typeof modelImportProgress?.percent === "number" ? " is-determinate" : " is-indeterminate"}`} aria-hidden="true"><span style={typeof modelImportProgress?.percent === "number" ? { width: `${modelImportProgress.percent}%` } : undefined} /></div>}
+          {modelImporting && panel === "character" && <div className={`floating-panel-loadbar${typeof displayedImportPercent === "number" ? " is-determinate" : " is-indeterminate"}`} aria-hidden="true"><span style={typeof displayedImportPercent === "number" ? { width: `${displayedImportPercent}%` } : undefined} /></div>}
           <div className="floating-panel-body">
             {!panel && <>
               <button type="button" className="floating-new-chat" onClick={newConversation}><Icon name="plus" size={17}/> New Chat</button>
               <div className="floating-menu-list">{navigation.map((item) => <button key={item.key} type="button" className="floating-nav-item" onClick={() => openPanel(item.key)}><Icon name={item.icon} size={18}/><span>{item.label}</span><span className="nav-chevron"><Icon name="chevron" size={16}/></span></button>)}</div>
             </>}
-            {panel === "conversations" && <>
-              <label className="floating-search"><Icon name="search" size={17}/><input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Search conversations" /></label>
-              <div className="conversation-list">{conversations.filter((item) => item.title.toLowerCase().includes(conversationSearch.toLowerCase()) || item.messages.some((entry) => entry.text.toLowerCase().includes(conversationSearch.toLowerCase()))).sort((a, b) => b.updatedAt - a.updatedAt).map((conversation) => <button key={conversation.id} type="button" className={conversation.id === activeConversationId ? "is-selected" : ""} onClick={() => selectConversation(conversation)}><span className="conversation-avatar">V</span><span><strong>{conversation.title}</strong><small>{conversation.messages.at(-1)?.text ?? "Start chatting with Vivian"}</small></span><time>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(conversation.updatedAt)}</time></button>)}</div>
-              {messages.some((item) => item.text !== GREETING_PENDING) && <details className="cloud-history"><summary>Messages in this conversation</summary><div className="chat-history">{messages.filter((item) => item.text !== GREETING_PENDING).map((item, index) => <div className={`chat-message ${item.from}`} key={item.id ?? index}><small>{item.from === "me" ? "You" : "Vivian"}</small><p>{item.text}</p></div>)}</div></details>}
-              {!conversations.length && <p className="floating-empty">Your conversations will appear here.</p>}
-              <p role="status">{!history.ready ? "Loading chat history…" : history.notice ?? "Chat history · Supabase"}</p><p className="floating-note">Conversations sync through Supabase across devices. Local copies keep unsynced messages available.</p>
-            </>}
+            {panel === "conversations" && (() => {
+              const preview = conversations.find((item) => item.id === previewConversationId);
+              const avatar = modelPreviews[activeModelId ?? ""] ?? Object.values(modelPreviews)[0];
+              const timeLabel = (updatedAt: number) => {
+                const days = Math.floor((Date.now() - updatedAt) / 86_400_000);
+                return days <= 0 ? "Today" : days === 1 ? "Yesterday" : new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(updatedAt);
+              };
+              const filtered = conversations.filter((item) => item.title.toLowerCase().includes(conversationSearch.toLowerCase()) || item.messages.some((entry) => entry.text.toLowerCase().includes(conversationSearch.toLowerCase()))).sort((a, b) => b.updatedAt - a.updatedAt);
+              if (preview) {
+                return <>
+                  <button type="button" className="preview-back" onClick={() => setPreviewConversationId(null)} aria-label="Back to all conversations"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg> All conversations</button>
+                  <div className="conversation-preview">
+                    <div className="preview-head">
+                      {avatar ? <img src={avatar} alt="" className="preview-avatar" /> : <span className="conversation-avatar">V</span>}
+                      <div className="preview-title"><strong>{preview.title}</strong><small>Vivian · always online</small></div>
+                    </div>
+                    <div className="preview-messages chat-history">
+                      {preview.messages.slice(-30).map((message, index) => <div className={`chat-message ${message.from}`} key={message.id ?? index}><small>{message.from === "me" ? "You" : "Vivian"}</small><p>{speechText(message.text)}</p></div>)}
+                    </div>
+                    <div className="preview-actions">
+                      <button type="button" className="ghost-btn primary" onClick={() => selectConversation(preview)}>Open chat</button>
+                      <button type="button" className="ghost-btn danger" onClick={() => void deleteConversation(preview.id)}>Delete</button>
+                    </div>
+                  </div>
+                </>;
+              }
+              return <>
+                <label className="floating-search"><Icon name="search" size={17}/><input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Search conversations" /></label>
+                {filtered.length ? <div className="conversation-list">{filtered.map((conversation) => {
+                  const last = conversation.messages.at(-1);
+                  const snippet = last ? speechText(last.text) : "Start chatting with Vivian";
+                  const isActive = conversation.id === activeConversationId;
+                  return <div key={conversation.id} className={`conversation-row${isActive ? " is-selected" : ""}`} role="group" aria-label={conversation.title}>
+                    <button type="button" className="conversation-open" aria-label={`Preview ${conversation.title}`} onClick={() => setPreviewConversationId(conversation.id)}>
+                      {avatar ? <img src={avatar} alt="" className="conversation-avatar" /> : <span className="conversation-avatar">V</span>}
+                      <span className="conversation-meta"><strong>{conversation.title}</strong><small>{snippet}</small></span>
+                      <time>{timeLabel(conversation.updatedAt)}</time>
+                    </button>
+                    {isActive && <span className="conversation-live" aria-label="Currently open">LIVE</span>}
+                    <button type="button" className="conversation-delete" aria-label={`Delete ${conversation.title}`} onClick={() => void deleteConversation(conversation.id)}>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                    </button>
+                  </div>;
+                })}</div> : <p className="floating-empty">{conversations.length ? "No conversations match your search." : "No conversations yet — start chatting with Vivian."}</p>}
+                <p role="status" className="history-status">{!history.ready ? "Loading chat history…" : history.notice ?? "Chat history · Supabase"}</p>
+              </>;
+            })()}
             {panel === "memories" && <>
               <div className="bond-panel"><p><strong>Daily check-in</strong> {streak} days together</p><p><strong>Mood</strong>{moodLabel(companion.mood)}</p>{[["Affinity", companion.affinity], ["Trust", companion.trust], ["Familiarity", companion.familiarity]].map(([label, value]) => <div key={String(label)}><span>{label}</span><i><b style={{ width: `${value}%` }}/></i><em>{value}</em></div>)}</div>
               <div className="memory-list">{memories.length ? memories.map((memory) => <article key={memory.id}><Icon name="memory" size={18}/>{editingMemoryId === memory.id ? <div className="memory-edit"><textarea value={memoryDraft} maxLength={500} onChange={(event) => setMemoryDraft(event.target.value)}/><div><button type="button" onClick={() => void saveMemory(memory)}>Save</button><button type="button" onClick={() => setEditingMemoryId(null)}>Cancel</button></div></div> : <><p><strong>{memory.category}</strong>{memory.memory}</p><button type="button" className="memory-edit-button" onClick={() => { setEditingMemoryId(memory.id); setMemoryDraft(memory.memory); }}>Edit</button></>}</article>) : <p className="floating-empty">Nothing has caught Vivian&apos;s attention yet.</p>}</div>
