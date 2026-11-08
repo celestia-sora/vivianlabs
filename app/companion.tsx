@@ -20,6 +20,7 @@ import { historyMessage, HISTORY_CACHE_KEY, type HistoryMessage, type HistoryCon
 import { deleteCloudHistory } from "@/lib/chat-history-client";
 import { authFetch } from "@/lib/auth/fetch";
 import { speechText } from "@/lib/speech";
+import { hapticFeedback, hapticPatterns } from "@/lib/haptics";
 import { decayCompanionState, type CompanionState, defaultCompanionState, normalizeMood, moodLabel, type Mood } from "@/lib/companion";
 import { detectLive2DEmotion, resolveLive2DExpression, resolveLive2DMotion } from "@/lib/live2d-emotion";
 import { createExpressionStack, loadExpressionParameterSets, SAVED_EXPRESSION_STACK_FILE, SAVED_EXPRESSION_STACK_NAME } from "@/lib/live2d-expression-stack";
@@ -2552,6 +2553,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }
   function runOrbDirection(action: OrbDirection) {
     setRadialVisible(false);
+    hapticFeedback(hapticPatterns.pick);
     // Picking mic, camera or the menu hub folds the text pill away first, so
     // the composer never floats open behind the action you chose.
     if (action === "mic") { closeComposer(); toggleRecording(); }
@@ -2568,6 +2570,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     orbHoldTimerRef.current = window.setTimeout(() => {
       orbHoldTimerRef.current = null;
       orbPttActiveRef.current = true;
+      hapticFeedback(hapticPatterns.arm);
       if (!micEnabledRef.current) {
         micEnabledRef.current = true;
         void startRecording();
@@ -2580,6 +2583,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     if (orbHoldTimerRef.current !== null) { window.clearTimeout(orbHoldTimerRef.current); orbHoldTimerRef.current = null; }
     if (orbPttActiveRef.current) {
       orbPttActiveRef.current = false;
+      hapticFeedback(hapticPatterns.confirm);
       if (micEnabledRef.current) {
         micEnabledRef.current = false;
         stopRecording();
@@ -2597,6 +2601,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     const now = Date.now();
     if (orbLastTapRef.current && now - orbLastTapRef.current <= 320) {
       orbLastTapRef.current = 0;
+      hapticFeedback(hapticPatterns.tick);
       setRadialVisible(true);
     } else {
       orbLastTapRef.current = now;
