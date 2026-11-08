@@ -48,34 +48,99 @@ export function singleFlightModel<T>(
   });
 }
 
+export interface PreloadModelPackagesOptions {
+  /** Returns true while the active/selected model is loading or switching. */
+  isActiveBusy?: () => boolean;
+}
+
+function delayWithAbort(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /**
- * Prioritize the selected model package so it is immediately usable.
- * Other packages are loaded lazily in the background with a delay.
+ * Yield before the next background package so the active model's
+ * rendering, input and speech keep priority. Prefers requestIdleCallback
+ * when available (browser), otherwise falls back to a short timer.
+ */
+function idleYield(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  const requestIdle = (globalThis as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (typeof requestIdle === "function") {
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        if (typeof (globalThis as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback === "function") {
+          (globalThis as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(id);
+        }
+        reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      };
+      const id = requestIdle.call(globalThis, () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, { timeout: 800 });
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+  return delayWithAbort(350, signal);
+}
+
+async function waitForLowPriorityWindow(signal: AbortSignal, isActiveBusy?: () => boolean): Promise<void> {
+  // Pause while the selected model owns initialization (assets, textures,
+  // GPU resources). Poll abortably so a new selection pauses immediately.
+  while (isActiveBusy?.()) {
+    signal.throwIfAborted();
+    await delayWithAbort(150, signal);
+  }
+  signal.throwIfAborted();
+  await idleYield(signal);
+}
+
+/**
+ * Background queue for non-selected packages.
+ *
+ * The selected model is intentionally excluded: it is owned by the render
+ * path with maximum priority (hydrate -> texture planning -> Live2DModel.from
+ * -> first frame). This queue only warms the remaining packages sequentially
+ * with low priority, reusing singleFlightModel deduplication and skipping
+ * packages that already hold in-memory assets.
  */
 export async function preloadModelPackages(
   packages: ModelPackage[], selectedModelId: string | null,
   load: (pack: ModelPackage, signal: AbortSignal) => Promise<unknown>, signal: AbortSignal,
+  options?: PreloadModelPackagesOptions,
 ): Promise<void> {
   const selectedPack = packages.find((pack) => pack.models.some((model) => model.id === selectedModelId));
-  const otherPacks = packages.filter((pack) => pack !== selectedPack);
-
-  // 1. Preload only the active/selected model package first and await it
-  if (selectedPack) {
-    signal.throwIfAborted();
-    await load(selectedPack, signal).catch((error: unknown) => {
-      if (signal.aborted) throw error;
-    });
+  const seen = new Set<string>();
+  const queue: ModelPackage[] = [];
+  // Catalog arrays are oldest -> newest (resolveStartupModel defaults to the
+  // last entry), so walk newest-first for background warming.
+  for (const pack of [...packages].reverse()) {
+    if (pack === selectedPack) continue;
+    // Already hydrated in memory: do not re-probe or re-download.
+    if (pack.assets.length > 0) continue;
+    if (seen.has(pack.id)) continue;
+    seen.add(pack.id);
+    queue.push(pack);
   }
-
-  // 2. Lazily preload the remaining packages one by one with a small yield/delay
-  for (const pack of otherPacks) {
+  for (const pack of queue) {
     signal.throwIfAborted();
-    // Yield to let UI and Live2D rendering run smoothly before fetching another model.
-    // Keep the gap short so neighbour previews appear soon after the first frame.
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitForLowPriorityWindow(signal, options?.isActiveBusy);
     signal.throwIfAborted();
     await load(pack, signal).catch((error: unknown) => {
       if (signal.aborted) throw error;
+      // Continue the queue after individual failures.
     });
   }
 }
