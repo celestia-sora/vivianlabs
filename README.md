@@ -103,6 +103,10 @@ All protected routes check sign-in via vivianAuth (`requireApiAccess`) and accou
 | `/api/storage/status` | Show storage use |
 | `/api/jev/status` | Show whether JEV is configured |
 
+## Agent workflow and versioning
+
+Repository agents must follow the mandatory end-of-task workflow in [`.agents/skills/vivian-release-sync/SKILL.md`](.agents/skills/vivian-release-sync/SKILL.md). After each completed implementation task, agents review the final diff and synchronize the in-app **ข้อมูลเวอร์ชัน** display when the product change warrants a version bump, `AGENTS.md`, and this README. The workflow uses semantic versioning: PATCH for fixes and compatible internal improvements, MINOR for meaningful compatible product milestones, and MAJOR for breaking product contracts. Documentation-only, audit-only, tooling-only, tests-only, and incomplete changes do not bump the app version.
+
 ## Developer corner 🛠️
 
 ```bash
