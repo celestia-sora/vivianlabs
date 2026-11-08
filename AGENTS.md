@@ -466,3 +466,17 @@ This section supersedes older fresh-only JEV and preflight descriptions above. R
 - Apply `20261006005533_cloud_conversation_history.sql` before deployment. Tables and `vivian_save_conversation` RPC are service-only, with RLS enabled. Local history migrates with cached stable UUIDs and remains a retry cache during outages.
 - `/api/chat` accepts optional conversation/message IDs and saves the active user/reply pair before returning, independently of TTS. Legacy clients retain the original request contract. Passive greetings remain ephemeral. Reset must pause and drain pending history writes before deleting cloud data.
 - Verify with `npm run test:history`, `npm run test:history:integration` and `npm run test:history:postgres` (disposable local Postgres container only). No regression test may use live chat history.
+
+
+## Mandatory Completion Workflow — Vivian Release Sync
+
+**Every AI agent completing an implementation task MUST run the `.agents/skills/vivian-release-sync/SKILL.md` workflow before reporting completion.** This applies to features, bug fixes, refactors, performance work, dependency changes, and architecture changes. Treat it as an automatic end-of-task requirement; do not wait for the user to remind you.
+
+The workflow must review and synchronize:
+1. The in-app **ข้อมูลเวอร์ชัน** display in `app/companion.tsx`, applying the documented semantic version policy when the product change warrants a bump.
+2. `AGENTS.md`, removing obsolete instructions and documenting the verified current architecture/contracts.
+3. `README.md`, keeping product behavior, setup, routes, migrations, and developer commands accurate.
+
+Do not bump the app version for documentation-only, tests-only, audit-only, tooling-only, or incomplete work. If the UI version is intentionally unchanged, say why in the completion report. Never document intended behavior as already implemented. Run relevant verification after the sync and report only checks actually performed.
+
+The skill is mandatory for all agents and all task assignments, not only release tasks. Read its full procedure and version policy before finalizing implementation work.
