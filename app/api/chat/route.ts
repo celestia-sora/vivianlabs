@@ -397,7 +397,8 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   // the character cap below is the actual limit.
   const responseTokenLimit = greeting ? 120 : passive ? 180 : 1200;
 
-  // Text chat order: Groq -> Gemini. Vision/search stay on Gemini because they require Gemini-specific capabilities.
+  // Text chat order: Groq -> Gemini. Vision runs on Groq Qwen 3.8 27B only.
+  // Search stays on Gemini because it requires Gemini-specific grounding.
   let provider: "groq" | "gemini" = "gemini";
 
   const buildGeminiContents = () => {
@@ -446,7 +447,9 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   let providerStarted = 0;
   const observeToken = (provider: string) => firstToken ? () => firstToken(provider, { preparationMs: providerStarted - requestStarted, providerMs: Date.now() - providerStarted }) : undefined;
 
-  // Capability route: Groq vision first, Gemini as fallback.
+  // Vision route: Groq Qwen 3.8 27B only (GROQ_VISION_MODEL). No Gemini
+  // fallback — if Qwen fails the request errors below instead of silently
+  // switching providers.
   if (plan.modelRoute === "vision") {
     // If the user is asking who/what is in the image, run a Tavily search in parallel
     // so the vision model has web context to identify characters/people/objects.
@@ -455,7 +458,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
       ? webSearchTool(lastUserText)
       : Promise.resolve(null);
 
-    // 1. Try Groq vision (qwen/qwen3.8-27b supports image_url inputs).
+    // Groq vision (qwen/qwen3.8-27b supports image_url inputs).
     if (!generatedData && groqApiKey) {
       try {
         // Await vision search in parallel with request build; it started above.
@@ -479,33 +482,8 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
       } catch (err) {
         console.warn(`Groq Vision (${groqVisionModel()}) network error`, err);
       }
-    }
-
-    // 2. Fall back to Gemini if Groq vision failed or is unavailable.
-    if (!generatedData && geminiApiKey) {
-      const geminiVisionCandidates = Array.from(new Set([
-        geminiPrimaryModel(),
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-2.5-pro",
-      ]));
-
-      for (const model of geminiVisionCandidates) {
-        try {
-          const payload = shouldSearch ? { ...geminiPayload, tools: [{ google_search: {} }] } : geminiPayload;
-          providerStarted = Date.now();
-          const res = await callGemini(geminiApiKey, payload, model, { timeoutMs: visionTimeoutMs, firstToken: observeToken("gemini") });
-          if (res.ok) {
-            generatedData = await res.json();
-            provider = "gemini";
-            break;
-          }
-          console.warn(`Gemini Vision (${model}) returned ${res.status}`);
-        } catch (err) {
-          console.warn(`Gemini Vision (${model}) network error`, err);
-        }
-      }
+    } else if (!groqApiKey) {
+      console.warn("Groq Vision unavailable: GROQ_API_KEY missing");
     }
   }
 
@@ -559,8 +537,8 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     }
   }
 
-  // 2. FALLBACK / SEARCH / VISION: Gemini.
-  if (!generatedData && geminiApiKey) {
+  // 2. FALLBACK / SEARCH: Gemini. Vision is excluded — it stays on Qwen.
+  if (!generatedData && geminiApiKey && plan.modelRoute !== "vision") {
     const geminiCandidates = Array.from(new Set([
       geminiPrimaryModel(),
       "gemini-2.5-flash",
