@@ -451,6 +451,37 @@ test("Groq 429 that persists after the retry still falls through to Gemini", asy
   );
 });
 
+test("Groq 429 with full token bucket compacts context instead of replaying the oversized payload", async () => {
+  let groqCalls = 0;
+  const fixture = chatFixture({
+    groqReply: (body) => {
+      groqCalls += 1;
+      if (groqCalls === 1) {
+        return new Response("rate limited", {
+          status: 429,
+          headers: {
+            "x-ratelimit-limit-tokens": "8000",
+            "x-ratelimit-remaining-tokens": "8000",
+            "x-ratelimit-reset-tokens": "1ms",
+            "x-ratelimit-reset-requests": "1ms",
+          },
+        });
+      }
+      assert.ok(body.messages.length <= 5);
+      assert.ok(body.messages.every((m) => typeof m.content === "string"));
+      return Response.json({ choices: [{ message: { content: "Vivian compact reply" } }] });
+    },
+  });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, "Vivian compact reply");
+  const groqBodies = fixture.calls.filter((call) => call.kind === "groq").map((call) => call.body);
+  assert.equal(groqBodies.length, 2);
+  const size = (body) => body.messages.reduce((n, m) => n + String(m.content).length, 0);
+  assert.ok(size(groqBodies[1]) <= size(groqBodies[0]));
+  assert.equal(fixture.calls.some((call) => call.kind === "gemini"), false);
+});
+
 test("fresh greetings request only 120 output tokens from Groq", async () => {
   const fixture = chatFixture();
   assert.equal((await fixture.post("Hello", { mode: "greeting" })).status, 200);

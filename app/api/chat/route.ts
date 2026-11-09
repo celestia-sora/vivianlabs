@@ -105,25 +105,58 @@ async function callGroq(
         ? { response_format: { type: "json_object" } }
         : {}),
   };
-  // 429 is a quota signal, not a bad request: wait out the reset window and
-  // replay the identical request exactly once, bounded so first attempt +
-  // wait + retry stays inside the 60s route budget. No retry on timeout or
-  // other statuses (Gemini fallback handles those upstream).
+  // 429 has two shapes: (a) bucket still full but this single request is
+  // over the model's token window (e.g. Qwen TPM 8000, reset "1ms") — compact
+  // and retry once immediately; (b) true quota exhaustion (remaining low,
+  // reset in seconds) — wait out the reset window and replay once. The
+  // identical-payload retry only ever helps shape (b).
+  const parseResetMs = (raw: string | null): number | null => {
+    if (!raw) return null;
+    const m = raw.trim().toLowerCase().match(/^([\d.]+)\s*(ms|s|m|h|d)$/);
+    if (!m) {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n * 1000 : null;
+    }
+    const mult = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000 }[m[2]] ?? 1;
+    return Number(m[1]) * mult;
+  };
+  const makePayload = (messages: any[]) => ({
+    ...payload,
+    messages,
+  });
+  let activePayload: Record<string, unknown> = payload;
   for (let attempt = 0; attempt < 2; attempt++) {
     const timeoutMs = attempt === 0 ? options.timeoutMs ?? providerTimeoutMs : Math.min(options.timeoutMs ?? providerTimeoutMs, 30_000);
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(activePayload),
     });
     if (response.status !== 429 || attempt === 1) {
       return options.firstToken ? readProviderStream(response, "openai", options.firstToken) : response;
     }
-    const retryAfterMs = Number(response.headers.get("retry-after")) * 1000;
-    const waitMs = Math.min(Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? retryAfterMs : 3000, 15_000);
+    const limitTokensRaw = response.headers.get("x-ratelimit-limit-tokens");
+    const remainingTokensRaw = response.headers.get("x-ratelimit-remaining-tokens");
+    const limitTokens = limitTokensRaw == null ? NaN : Number(limitTokensRaw);
+    const remainingTokens = remainingTokensRaw == null ? NaN : Number(remainingTokensRaw);
+    const retryAfterRaw = response.headers.get("retry-after");
+    const retryAfterMs = retryAfterRaw == null ? NaN : Number(retryAfterRaw) * 1000;
+    const resetMs = parseResetMs(response.headers.get("x-ratelimit-reset-tokens"))
+      ?? parseResetMs(response.headers.get("x-ratelimit-reset-requests"));
+    const stringOnly = Array.isArray(messages) && messages.every((m) => typeof m?.content === "string");
+    const tooLargeLikely = stringOnly && Number.isFinite(remainingTokens) && Number.isFinite(limitTokens)
+      && limitTokens > 0 && remainingTokens >= limitTokens * 0.9;
     await response.body?.cancel().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    if (tooLargeLikely) {
+      activePayload = makePayload(compactGroqMessages(messages));
+      continue;
+    }
+    const waitMs = Math.min(
+      (Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : resetMs ?? 3000),
+      15_000,
+    );
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
   throw new Error(`Groq ${model} request failed after quota retry`);
 }
