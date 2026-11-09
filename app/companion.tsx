@@ -340,11 +340,13 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     savedCustomInstructions,
     updateCustomInstructions,
     saveCustomInstructions,
-    resetCustomInstructions,
     savingCustomInstructions,
     customInstructionsDirty,
     customInstructionsSynced,
     customInstructionsNotice,
+    customInstructionVersions,
+    clearCustomInstructions,
+    restoreCustomInstructions,
   } = useCustomInstructions();
   const customInstructionsRef = useRef("");
   useEffect(() => { customInstructionsRef.current = savedCustomInstructions; }, [savedCustomInstructions]);
@@ -2259,7 +2261,9 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       if (!response.ok) throw new Error("Reset failed");
       const data = await response.json() as { ok?: boolean };
       if (data.ok !== true) throw new Error("Reset unconfirmed");
-      for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak", LAST_IDLE_KEY, "vivian-custom-instructions"]) window.localStorage.removeItem(key);
+      // D7: Reset KEEPS custom instructions (persona persists) — do not
+      // remove the vivian-custom-instructions cache or cloud singleton.
+      for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak", LAST_IDLE_KEY]) window.localStorage.removeItem(key);
       const id = crypto.randomUUID();
       window.localStorage.setItem("vivian-active-conversation", id);
       setActiveConversationId(id);
@@ -2268,7 +2272,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       setMessages([]);
       setMemories([]);
       setCompanion(defaultCompanionState());
-      resetCustomInstructions();
       setStreak(0);
       setMessage("");
       setAttachedImage(null);
@@ -2714,7 +2717,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
               </button>
             </>}
              {panel === "status" && <StorageStatusPanel/>}
-              {panel === "settings" && <><div className="custom-instructions"><strong>Reset Vivian</strong><p>ล้างความจำ แชต Mood และความสัมพันธ์บนคลาวด์ที่ใช้ร่วมกัน รวมถึงประวัติแชตและคำแนะนำส่วนตัวที่ซิงก์ทุกเครื่อง</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ข้อมูลนี้จะถูกลบถาวรจากคลาวด์ที่ใช้ร่วมกันและแชตบนอุปกรณ์นี้ โมเดล การตั้งค่าเสียง และบัญชีล็อกอินจะยังอยู่</p><button type="button" className="floating-option" disabled={sending || resetting || savingCustomInstructions} onClick={() => { void resetVivian(); }}>ยืนยันรีเซ็ต Vivian</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting || savingCustomInstructions} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังรีเซ็ต…" : "Reset memories and companion"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>Custom instructions</strong><p>How should Vivian speak with you? Saved to your account and synced across devices.</p><textarea value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="Call me… Speak in Thai…"/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "Saving…" : "Save"}</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้บันทึก" : "ซิงก์ทุกเครื่องแล้ว")}</span></div></div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> Language <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> About Vivian</button></>}
+              {panel === "settings" && <><div className="custom-instructions"><strong>Reset Vivian</strong><p>ล้างความจำ แชต Mood และความสัมพันธ์บนคลาวด์ที่ใช้ร่วมกัน รวมถึงประวัติแชต — คำแนะนำส่วนตัว (persona) จะยังอยู่ ไม่ถูกล้าง</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ข้อมูลนี้จะถูกลบถาวรจากคลาวด์ที่ใช้ร่วมกันและแชตบนอุปกรณ์นี้ โมเดล การตั้งค่าเสียง และบัญชีล็อกอินจะยังอยู่</p><button type="button" className="floating-option" disabled={sending || resetting} onClick={() => { void resetVivian(); }}>ยืนยันรีเซ็ต Vivian</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังรีเซ็ต…" : "Reset memories and companion"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>Custom instructions</strong><p>How should Vivian speak with you? Saved to your account and synced across devices.</p><textarea value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="Call me… Speak in Thai…"/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "Saving…" : "Save"}</button><button type="button" className="floating-option" disabled={savingCustomInstructions || !savedCustomInstructions} onClick={() => { void clearCustomInstructions(); }}>ล้างคำแนะนำ</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้บันทึก" : "ซิงก์ทุกเครื่องแล้ว")}</span><span role="status">{customInstructions.length} / 2000</span></div>{customInstructionVersions.length > 1 && <div className="custom-instructions-actions"><span>เวอร์ชันก่อนหน้า</span>{customInstructionVersions.slice(1, 4).map((v) => <button key={v.id} type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => restoreCustomInstructions(v.instructions)}>Restore previous version {new Date(v.created_at).toLocaleString()}</button>)}</div>}</div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> Language <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> About Vivian</button></>}
             {panel === "settings" && <div className="account-settings"><div><small>ลงชื่อเข้าใช้ด้วย</small><p>{accountEmail}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
           </div>
         </section>

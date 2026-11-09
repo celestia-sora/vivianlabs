@@ -49,12 +49,15 @@ async function writeRemote(value: string): Promise<string | null> {
   }
 }
 
+export interface CustomInstructionVersion { id: number; created_at: string; instructions: string }
+
 export function useCustomInstructions() {
   const [value, setValue] = useState(readCache);
   const [savedValue, setSavedValue] = useState(readCache);
   const [saving, setSaving] = useState(false);
   const [synced, setSynced] = useState(hasSynced);
   const [notice, setNotice] = useState("");
+  const [versions, setVersions] = useState<CustomInstructionVersion[]>([]);
   const alive = useRef(false);
   const savingRef = useRef(false);
   const revision = useRef(0);
@@ -71,8 +74,11 @@ export function useCustomInstructions() {
     try {
       const response = await authFetch("/api/custom-instructions", { cache: "no-store", signal: AbortSignal.timeout(9000) });
       if (!response.ok) throw new Error();
-      const data = await response.json() as { customInstructions?: unknown };
+      const data = await response.json() as { customInstructions?: unknown; versions?: unknown };
       if (typeof data.customInstructions !== "string") throw new Error();
+      if (alive.current && version === revision.current && Array.isArray(data.versions)) {
+        setVersions(data.versions.filter((v): v is CustomInstructionVersion => !!v && typeof v === "object" && typeof (v as CustomInstructionVersion).instructions === "string").map(v => ({ id: (v as CustomInstructionVersion).id, created_at: (v as CustomInstructionVersion).created_at, instructions: bounded((v as CustomInstructionVersion).instructions) })));
+      }
       if (!alive.current || version !== revision.current) return;
 
       const remote = bounded(data.customInstructions);
@@ -166,6 +172,32 @@ export function useCustomInstructions() {
     setNotice("");
   }, []);
 
+  // D7: clearing custom instructions is a separate explicit action,
+  // distinct from Reset Vivian (which now keeps them).
+  const clearCustomInstructions = useCallback(async () => {
+    if (savingRef.current) return;
+    revision.current += 1;
+    setValue("");
+    setSavedValue("");
+    setNotice("กำลังล้าง…");
+    const saved = await writeRemote("");
+    if (saved === null) { setNotice("ล้างไม่สำเร็จ · ลองอีกครั้ง"); return; }
+    markSynced();
+    writeCache(saved);
+    setSavedValue(saved);
+    setValue(saved);
+    setSynced(true);
+    setNotice("ล้างคำแนะนำแล้ว");
+  }, []);
+
+  // Restore a previous version into the draft; user reviews then Saves,
+  // which appends it as a new version row (bad edit recoverable).
+  const restoreCustomInstructions = useCallback((instructions: string) => {
+    revision.current += 1;
+    setValue(bounded(instructions));
+    setNotice("โหลดเวอร์ชันก่อนหน้าแล้ว · กด Save เพื่อใช้");
+  }, []);
+
   return {
     customInstructions: value,
     savedCustomInstructions: savedValue,
@@ -177,5 +209,8 @@ export function useCustomInstructions() {
     customInstructionsDirty: value !== savedValue,
     customInstructionsSynced: synced,
     customInstructionsNotice: notice,
+    customInstructionVersions: versions,
+    clearCustomInstructions,
+    restoreCustomInstructions,
   };
 }

@@ -32,7 +32,8 @@ const harness = load("../lib/chat-decision.ts", { "@/lib/tools": tools, "@/lib/j
 const companion = load("../lib/companion.ts");
 const story = load("../lib/vivian-story.ts");
 const dialogue = load("../lib/vivian-dialogue.ts");
-const persona = load("../lib/vivian-persona.ts");
+const customInstructions = load("../lib/custom-instructions.ts");
+const persona = load("../lib/vivian-persona.ts", { "@/lib/custom-instructions": customInstructions });
 const keys = ["needs_current_information", "needs_memory", "recalls_memory", "needs_vision", "needs_time", "needs_weather", "needs_calculator", "needs_integrations", "supportive_response", "explanatory_response"];
 function answers(values = {}) {
   return { answers: Object.fromEntries(keys.map((key) => [key, { type: "noul", noul: values[key] ?? (key === "needs_memory" ? 0.5 : 0.01) }])) };
@@ -246,6 +247,7 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/vivian-story": story,
     "@/lib/vivian-dialogue": dialogue,
     "@/lib/vivian-persona": persona,
+    "@/lib/custom-instructions": customInstructions,
     "@/lib/speech": load("../lib/speech.ts"),
     "@/lib/companion-store": { loadCompanionState: async () => { calls.push({ kind: "state" }); return companion.defaultCompanionState(); }, saveCompanionState: () => assert.fail("Background writes must not run in fixtures") },
     "@/lib/supabase-admin": { getSupabaseAdmin() {
@@ -288,8 +290,8 @@ test("chat integrates a single JEV pass; state starts in parallel; main LLM rece
   const prompt = fixture.calls.find((call) => call.kind === "groq").body.messages[0].content;
   assert.match(prompt, /Vivian/); assert.match(prompt, /Likes tea/);
   assert.ok(prompt.startsWith(persona.vivianPersonaPrompt));
-  assert.match(prompt, /shy, polite, slightly awkward tsundere manner/);
-  assert.match(prompt, /draw from all ElevenLabs audio-tag categories when useful/);
+  assert.match(prompt, /shy, polite, slightly awkward tsundere companion/);
+  assert.match(prompt, /Draw only from: Emotion/);
   assert.equal(prompt.includes(dialogue.VIVIAN_DIALOGUE_EXAMPLE), false);
   assert.equal(fixture.background.length, 1);
 });
@@ -347,7 +349,7 @@ test("chat skips irrelevant durable memory, executes approved local tools and ad
   assert.deepEqual(body.tools, ["calculator"]);
   assert.equal(fixture.memoryLoads.length, 0);
   const prompt = fixture.calls.find((call) => call.kind === "groq").body.messages[0].content;
-  assert.match(prompt, /= 4/); assert.match(prompt, /Treat the explanation request as another conversational move/); assert.match(prompt, /If she refuses, keep that refusal for the rest of the message/); assert.doesNotMatch(prompt, /ตอบเนื้อหาให้ครบตามที่ขอ|Explain the answer clearly/);
+  assert.match(prompt, /= 4/); assert.match(prompt, /Treat the explanation request as another conversational move/); assert.match(prompt, /Once she chooses refusal in a reply, she does not append/); assert.doesNotMatch(prompt, /ตอบเนื้อหาให้ครบตามที่ขอ|Explain the answer clearly/);
 });
 
 test("chat executes a semantic time decision even without an existing time regex match", async () => {
@@ -601,10 +603,10 @@ test("tsundere persona and latest custom instructions reach all dialogue provide
     const body=fixture.calls.find(call=>call.kind===provider).body;
     const prompt=provider==="gemini" ? body.systemInstruction.parts[0].text : body.messages[0].content;
     assert.ok(prompt.startsWith(persona.vivianPersonaPrompt));
-    assert.match(prompt,/# Vivian — shy, polite tsundere companion/);
+    assert.match(prompt,/# Vivian \| Immutable Core/);
     assert.match(prompt,/ตอบเป็น ภาษาไทย/);
     assert.match(prompt,/คำถามเกี่ยวกับตัว Vivian/);
-    assert.match(prompt,/three or four genuine follow-up turns/);
+    assert.match(prompt,/3-4 persistent follow-ups/);
     assert.match(prompt,/LANGUAGE LOCK — FINAL RULE: Reply only in ภาษาไทย \(Thai\)/);
     assert.match(prompt, new RegExp(`${customInstructions}[\\s\\S]*LANGUAGE LOCK — FINAL RULE`));
   }
@@ -632,9 +634,9 @@ test("custom instructions are bounded; empty preferences still get the persisten
   for(const customInstructions of ["", "x".repeat(2100)]) {
     const fixture=chatFixture(); await fixture.post("วันนี้เหนื่อย",{customInstructions});
     const prompt=fixture.calls.find(call=>call.kind==="groq").body.messages[0].content;
-    assert.match(prompt,/# Vivian — shy, polite tsundere companion/);
-    if(customInstructions) {assert.match(prompt,new RegExp("x{1200}[\\s\\S]*LANGUAGE LOCK"));assert.equal(prompt.includes("x".repeat(1201)),false);}
-    else assert.doesNotMatch(prompt,/Conversation preferences for this turn/);
+    assert.match(prompt,/# Vivian \| Immutable Core/);
+    if(customInstructions) {assert.match(prompt,new RegExp("x{2000}[\\s\\S]*LANGUAGE LOCK"));assert.equal(prompt.includes("x".repeat(2001)),false);}
+    else assert.doesNotMatch(prompt,/Persona profile — custom instructions, layer 2/);
     assert.doesNotMatch(prompt,/ตานี้ถูกถามชื่อ/);
   }
 });
@@ -647,9 +649,9 @@ test("self-question persistence reaches the provider as actual separate turns", 
     const fixture=chatFixture(); await fixture.post("",{messages});
     const turns=fixture.calls.find(call=>call.kind==="groq").body.messages;
     assert.equal(turns.filter(turn=>turn.role==="user").length,count+1);
-    assert.match(turns[0].content,/Questions about Vivian's own identity/);
-    assert.match(turns[0].content,/Count only actual turns/);
-    assert.match(turns[0].content,/new topic starts over/);
+    assert.match(turns[0].content,/คำถามเกี่ยวกับตัว Vivian/);
+    assert.match(turns[0].content,/3–4 turn/);
+    assert.match(turns[0].content,/หัวข้อใหม่เริ่มนับใหม่/);
     if(count<followups.length)messages.push({role:"assistant",content:"ไม่บอกหรอก"},{role:"user",content:followups[count]});
   }
 });
