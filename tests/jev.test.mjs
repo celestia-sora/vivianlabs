@@ -26,8 +26,8 @@ function load(path, imports = {}, globals = {}) {
   return exports;
 }
 const tools = load("../lib/tools.ts");
-const jev = load("../lib/jev.ts");
 const scenes = load("../lib/scenes.ts");
+const jev = load("../lib/jev.ts", { "@/lib/scenes": scenes });
 const harness = load("../lib/chat-decision.ts", { "@/lib/tools": tools, "@/lib/jev": jev, "@/lib/scenes": scenes });
 const companion = load("../lib/companion.ts");
 const story = load("../lib/vivian-story.ts");
@@ -136,7 +136,7 @@ test("unknown answer types cannot introduce free text or commands", () => {
 
 function client(fetch, env = { TYPESAFE_API_KEY: "fixture-key" }, timeout = 2000) {
   const logs = [];
-  return { module: load("../lib/jev.ts", {}, {
+  return { module: load("../lib/jev.ts", { "@/lib/scenes": scenes }, {
     fetch, process: { env },
     console: { debug: (...args) => logs.push(args) },
     AbortSignal: { timeout(ms) { assert.equal(ms, 2000); return AbortSignal.timeout(timeout); } },
@@ -519,10 +519,11 @@ test("scene selection joins one batch and projects only IDs and manual labels", 
   const fixture = client(async (_url, options) => { calls.push(JSON.parse(options.body)); return Response.json(sceneAnswers([0.99, 0.01])); });
   const result = await fixture.module.decideVivian(context("ง่วงแล้ว กลับไปนอนกัน", { scenes: { autoScene: true, activeSceneId: null, available: sceneCatalog.map((scene) => ({ ...scene, image: "PRIVATE_IMAGE", imageUrl: "PRIVATE_URL", imageKey: "PRIVATE_KEY" })) } }));
   assert.equal(calls.length, 1);
-  assert.equal(Object.keys(calls[0].questions).length, 12);
-  assert.deepEqual(JSON.parse(calls[0].state).availableScenes, sceneCatalog);
+  // Auto switching is disabled: no scene questions or catalog are sent.
+  assert.equal(Object.keys(calls[0].questions).length, 10);
+  assert.equal(JSON.parse(calls[0].state).availableScenes, undefined);
   assert.doesNotMatch(JSON.stringify(calls), /PRIVATE/);
-  assert.equal(result.decision.scene.id, sceneCatalog[0].id);
+  assert.equal(result.decision.scene.change, false);
 });
 test("no scene change, ties, missing/malformed scene answers keep the scene without discarding chat decisions", () => {
   for (const scores of [[0.01, 0.01], [0.5, 0.5], [0.99, 0.98], [1.1, 0], [NaN, 0], []]) {
@@ -534,7 +535,8 @@ test("no scene change, ties, missing/malformed scene answers keep the scene with
 test("Harness rejects unknown scene IDs, disabled auto scenes, passive changes and same-scene changes", () => {
   const decision = jev.parseJevDecision(sceneAnswers([0.99, 0]), sceneCatalog);
   const ctx = context("sleep", { scenes: { autoScene: true, activeSceneId: null, available: sceneCatalog } });
-  assert.equal(harness.resolveChatPlan(ctx, decision, false).scene.id, sceneCatalog[0].id);
+  // Auto switching is disabled globally: even a valid proposal never switches.
+  assert.equal(harness.resolveChatPlan(ctx, decision, false).scene.change, false);
   for (const [input, proposal, passive] of [
     [{ ...ctx, scenes: { ...ctx.scenes, autoScene: false } }, decision, false],
     [ctx, { ...decision, scene: { change: true, id: "another-users-scene" } }, false],
@@ -558,7 +560,8 @@ test("valid scene decision returns through normal chat JSON without image data i
   const response = await fixture.post("ง่วงแล้ว กลับไปนอนกัน");
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(body.scene.id, sceneCatalog[0].id);
+  // Auto switching is disabled: chat completes but never changes the scene.
+  assert.equal(body.scene.change, false);
   assert.equal(body.text, "Vivian fixture reply");
   assert.equal(fixture.calls.filter((call) => call.kind === "jev").length, 1);
   assert.doesNotMatch(JSON.stringify(fixture.calls), /imageKey|imageUrl|thumbnailUrl|vivian-scenes/);
@@ -580,11 +583,13 @@ test("scene bar is presentation-low: 0.65 passes, below fails, and the question 
   assert.equal(jev.parseJevDecision(sceneAnswers([0.64, 0.1]), mansionCatalog).scene.change, false);
   assert.equal(jev.parseJevDecision(sceneAnswers([0.9, 0.87]), mansionCatalog).scene.change, false);
   assert.equal(jev.parseJevDecision(sceneAnswers([0.9, 0.84]), mansionCatalog).scene.id, mansionCatalog[0].id);
+  // Auto switching is disabled: no scene questions are generated.
   const calls = [];
   const fixture = client(async (_url, options) => { calls.push(JSON.parse(options.body)); return Response.json(sceneAnswers([0.01, 0.01])); });
   await fixture.module.decideVivian(context("กลับคฤหาสน์กัน", { scenes: { autoScene: true, activeSceneId: null, available: mansionCatalog } }));
-  assert.match(calls[0].questions.scene_0.instructions, /คฤหาสน์/);
-  assert.match(calls[0].questions.scene_0.instructions, /Vivian mentioning/);
+  assert.equal(Object.keys(calls[0].questions).length, 10);
+  assert.equal(calls[0].questions.scene_0, undefined);
+  assert.equal(JSON.parse(calls[0].state).availableScenes, undefined);
 });
 test("explicit scene name switches even when JEV under-scores or is disabled", async () => {
   assert.equal(scenes.findSceneLabelMatch(["พรุ่งนี้กลับคฤหาสน์กัน"], mansionCatalog, null), mansionCatalog[0].id);
@@ -596,11 +601,12 @@ test("explicit scene name switches even when JEV under-scores or is disabled", a
   assert.equal(scenes.sceneLabelForId(mansionCatalog, null), null);
   const disabled = chatFixture({ env: { JEV_ENABLED: "false" }, sceneContext: mansionContext });
   const disabledBody = await (await disabled.post("วันนี้เรากลับคฤหาสน์กัน")).json();
-  assert.equal(disabledBody.scene.id, mansionCatalog[0].id);
+  // Auto switching is disabled: mentioning a label no longer switches.
+  assert.equal(disabledBody.scene.change, false);
   assert.equal(disabled.calls.filter((call) => call.kind === "jev").length, 0);
   const low = chatFixture({ sceneContext: mansionContext, jevFetch: async () => Response.json(sceneAnswers([0.01, 0.01])) });
   const lowBody = await (await low.post("ไปคาเฟ่กันเถอะ")).json();
-  assert.equal(lowBody.scene.id, mansionCatalog[1].id);
+  assert.equal(lowBody.scene.change, false);
 });
 test("Vivian naming the scene in her reply switches it the same turn, and she is told where she is without repeating the name", async () => {
   const reply = chatFixture({
@@ -609,7 +615,8 @@ test("Vivian naming the scene in her reply switches it the same turn, and she is
     groqReply: () => Response.json({ choices: [{ message: { content: "งั้นกลับคฤหาสน์กันเถอะ" } }] }),
   });
   const replyBody = await (await reply.post("วันนี้ไปไหนดี")).json();
-  assert.equal(replyBody.scene.id, mansionCatalog[0].id);
+  // Auto switching is disabled: Vivian naming a scene no longer switches it.
+  assert.equal(replyBody.scene.change, false);
   assert.match(replyBody.text, /คฤหาสน์/);
   const home = chatFixture({ sceneContext: { ...mansionContext, activeSceneId: mansionCatalog[0].id } });
   await home.post("สวัสดี");

@@ -143,7 +143,7 @@ test("label editing, image replacement and active deletion clean objects and pre
   const f = storeFixture(); const scene = await create(f); const oldKey = f.rows.vivian_scenes[0].image_key;
   const edited = await f.module.saveScene(f.db, owner, { label: "บ้านของ Vivian" }, scene.id); assert.equal(edited.label, "บ้านของ Vivian"); assert.equal(f.rows.vivian_scenes[0].image_key, oldKey);
   await f.module.setScenePreferences(f.db, owner, { autoScene: true });
-  const selected = await f.module.setScenePreferences(f.db, owner, { activeSceneId: scene.id }); assert.equal(selected.autoScene, true); assert.equal(selected.activeSceneId, scene.id);
+  const selected = await f.module.setScenePreferences(f.db, owner, { activeSceneId: scene.id }); assert.equal(selected.autoScene, false); assert.equal(selected.activeSceneId, scene.id);
   await f.module.saveScene(f.db, owner, { label: "บ้านของ Vivian", sourceType: "url", ...image }, scene.id); assert.equal(f.objects.size, 2); assert.equal(f.objects.has(oldKey), false);
   await f.module.deleteScene(f.db, owner, scene.id); assert.equal(f.objects.size, 0); assert.equal(f.rows.vivian_scenes.length, 0); assert.equal(f.rows.vivian_scene_preferences[0].active_scene_id, null);
 });
@@ -159,8 +159,8 @@ test("selecting a custom scene with preset:null persists instead of 'Invalid def
   await f.module.setScenePreferences(f.db, owner, { preset: "day" });
   const selected = await f.module.setScenePreferences(f.db, owner, { activeSceneId: scene.id, preset: null });
   assert.equal(selected.activeSceneId, scene.id); assert.equal(selected.preset, null);
-  const toggled = await f.module.setScenePreferences(f.db, owner, { autoScene: true }); assert.equal(toggled.activeSceneId, scene.id);
-  assert.equal((await f.module.loadSceneContext(owner)).activeSceneId, scene.id);
+  const toggled = await f.module.setScenePreferences(f.db, owner, { autoScene: true }); assert.equal(toggled.autoScene, false); assert.equal(toggled.activeSceneId, scene.id);
+  assert.equal(await f.module.loadSceneContext(owner), null);
 });
 test("storage, thumbnail and record creation failures cannot leave broken scenes or untracked objects", async () => {
   for (const failure of ["upload", "thumbnail", "vivian_scenes:insert"]) {
@@ -173,15 +173,15 @@ test("storage, thumbnail and record creation failures cannot leave broken scenes
 test("scene context excludes objects and Harness checks ownership, availability, enabled state and stale preference revisions", async () => {
   const f = storeFixture(); const scene = await create(f);
   await f.module.setScenePreferences(f.db, owner, { autoScene: true });
-  const context = await f.module.loadSceneContext(owner); assert.deepEqual(Object.keys(context.scenes[0]).sort(), ["id", "label"]);
+  // Auto switching is disabled: context is null even with auto_scene requested,
+  // and execution never changes the scene.
+  assert.equal(await f.module.loadSceneContext(owner), null);
   const decision = { change: true, id: scene.id };
-  const result = await f.module.executeSceneDecision(context, decision); assert.equal(result.change, true); assert.equal(result.id, scene.id);
-  assert.equal((await f.module.executeSceneDecision(context, decision)).change, false);
-  for (const ctx of [null, { ...context, autoScene: false }, { ...context, userId: other }, { ...context, activeSceneId: scene.id }]) assert.equal((await f.module.executeSceneDecision(ctx, decision)).change, false);
-  assert.equal((await f.module.executeSceneDecision(context, { change: true, id })).change, false);
-  assert.equal((await f.module.executeSceneDecision(context, { change: false })).change, false);
-  assert.equal((await f.module.executeSceneDecision(context, { change: "true", id: scene.id })).change, false);
-  const latest = await f.module.loadSceneContext(owner); f.fail("info"); assert.equal((await f.module.executeSceneDecision({ ...latest, activeSceneId: null }, decision)).change, false);
+  const fakeContext = { userId: owner, autoScene: true, activeSceneId: null, revision: "test", scenes: [{ id: scene.id, label: "ห้องนอน" }] };
+  for (const ctx of [null, fakeContext, { ...fakeContext, autoScene: false }, { ...fakeContext, userId: other }, { ...fakeContext, activeSceneId: scene.id }]) assert.equal((await f.module.executeSceneDecision(ctx, decision)).change, false);
+  assert.equal((await f.module.executeSceneDecision(fakeContext, { change: true, id })).change, false);
+  assert.equal((await f.module.executeSceneDecision(fakeContext, { change: false })).change, false);
+  assert.equal((await f.module.executeSceneDecision(fakeContext, { change: "true", id: scene.id })).change, false);
 });
 
 test("chunked API bodies cannot exceed upload/JSON/settings limits", async () => {

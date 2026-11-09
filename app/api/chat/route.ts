@@ -13,7 +13,7 @@ import { runTools, toolsPromptBlock, webSearchTool, visionSearchIntent } from "@
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { decideVivian, type JevContext } from "@/lib/jev";
 import { loadSceneContext, executeSceneDecision } from "@/lib/scene-store";
-import { findSceneLabelMatch, sceneLabelForId, type SceneDecision } from "@/lib/scenes";
+import { AUTO_SCENE_ENABLED, findSceneLabelMatch, sceneLabelForId, type SceneDecision } from "@/lib/scenes";
 import { resolveChatPlan } from "@/lib/chat-decision";
 import { limitReplyCharacters, replyCharacterLimit } from "@/lib/speech";
 import {
@@ -829,11 +829,15 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   // "กลับคฤหาสน์กัน"), switch to that scene in the same turn instead of
   // waiting for the user's next message. JEV ran before generation, so it
   // could not see this mention; this scan closes that loop.
-  const replySceneId = !passive && sceneContext && !plan.scene.change
-    ? findSceneLabelMatch([text], sceneContext.scenes, sceneContext.activeSceneId)
-    : null;
-  const effectiveScene: SceneDecision = plan.scene.change ? plan.scene : (replySceneId ? { change: true, id: replySceneId } : plan.scene);
-  const scene = await executeSceneDecision(sceneContext, effectiveScene).catch(() => ({ change: false as const }));
+  const scene: SceneDecision = !AUTO_SCENE_ENABLED
+    ? { change: false }
+    : await (async () => {
+      const replySceneId = !passive && sceneContext && !plan.scene.change
+        ? findSceneLabelMatch([text], sceneContext.scenes, sceneContext.activeSceneId)
+        : null;
+      const effectiveScene: SceneDecision = plan.scene.change ? plan.scene : (replySceneId ? { change: true, id: replySceneId } : plan.scene);
+      return executeSceneDecision(sceneContext, effectiveScene).catch(() => ({ change: false as const }));
+    })();
   return NextResponse.json({
     scene,
     text,

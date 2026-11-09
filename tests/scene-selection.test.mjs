@@ -12,6 +12,7 @@ function fixture() {
   const cached = { scenes: [{ id: 'a', imageUrl: '/a', thumbnailUrl: '/a-thumb' }, { id: 'b', imageUrl: '/b' }], preferences: { autoScene: false, activeSceneId: 'a', preset: null, revision: '1' } };
   const loaded = loadSceneModule('../lib/use-scene-library.ts', {
     react: hooks,
+    '@/lib/scenes': { AUTO_SCENE_ENABLED: false },
     '@/lib/auth/fetch': { authFetch: (path, options) => { calls.push({ path, options }); return new Promise((resolve) => requests.push(resolve)); } },
     '@/lib/storage-status': { notifyStorageChanged() {} },
     '@/lib/scene-preload': { preloadSceneLibrary: async () => {} },

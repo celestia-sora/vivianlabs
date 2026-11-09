@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { SceneError, SCENE_MAX_COUNT, sceneThumbnailKey, sceneImageExtension, validateSceneId, validateSceneLabel, type VivianScene, type ScenePreferences, type SceneDecision } from "@/lib/scenes";
+import { SceneError, SCENE_MAX_COUNT, AUTO_SCENE_ENABLED, sceneThumbnailKey, sceneImageExtension, validateSceneId, validateSceneLabel, type VivianScene, type ScenePreferences, type SceneDecision } from "@/lib/scenes";
 import { saveCloudSceneImages, removeCloudSceneImages } from "@/lib/cloud-store";
 import { getR2Image, modelObjectSize } from "@/lib/r2";
 
@@ -116,7 +116,7 @@ export async function setScenePreferences(db: SupabaseClient, userId: string, va
   const changes: Record<string, unknown> = { user_id: userId, revision: randomUUID(), updated_at: new Date().toISOString() };
   if ("autoScene" in body) {
     if (typeof body.autoScene !== "boolean") throw new SceneError("Invalid AI Auto Scene setting.");
-    changes.auto_scene = body.autoScene;
+    changes.auto_scene = AUTO_SCENE_ENABLED ? body.autoScene : false;
   }
   if ("activeSceneId" in body) {
     if (body.activeSceneId !== null) await getScene(db, userId, validateSceneId(body.activeSceneId));
@@ -180,6 +180,7 @@ function sceneDebug(message: string, extra?: Record<string, unknown>): void {
 }
 
 export async function loadSceneContext(userId: string | null): Promise<SceneContext | null> {
+  if (!AUTO_SCENE_ENABLED) return null;
   try {
     if (!userId) { sceneDebug("context skipped: no user"); return null; }
     // 1.2s (up from 0.6s): Supabase cold/round-trip can exceed 600ms for two
@@ -198,6 +199,7 @@ export async function loadSceneContext(userId: string | null): Promise<SceneCont
 }
 export async function executeSceneDecision(context: SceneContext | null, decision: SceneDecision | undefined): Promise<SceneDecision> {
   const unchanged: SceneDecision = { change: false };
+  if (!AUTO_SCENE_ENABLED) return unchanged;
   try {
     if (!context?.autoScene) { sceneDebug("execute skip: auto off / no context"); return unchanged; }
     if (decision?.change !== true) { sceneDebug("execute skip: no proposal"); return unchanged; }

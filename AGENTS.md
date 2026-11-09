@@ -466,3 +466,10 @@ This section supersedes older fresh-only JEV and preflight descriptions above. R
 - Apply `20261006005533_cloud_conversation_history.sql` before deployment. Tables and `vivian_save_conversation` RPC are service-only, with RLS enabled. Local history migrates with cached stable UUIDs and remains a retry cache during outages.
 - `/api/chat` accepts optional conversation/message IDs and saves the active user/reply pair before returning, independently of TTS. Legacy clients retain the original request contract. Passive greetings remain ephemeral. Reset must pause and drain pending history writes before deleting cloud data.
 - Verify with `npm run test:history`, `npm run test:history:integration` and `npm run test:history:postgres` (disposable local Postgres container only). No regression test may use live chat history.
+
+## Patch 2.5.1 — 2026-11-09
+
+- Auto Scene switching is disabled; scenes are manual-only.
+- ElevenLabs leading Emotion tag is mandatory; Live2D face/expression follows the leading tag.
+- Nariell color-change/eye/hair/tail are excluded from auto emote (chibi manual-only).
+- Version: vivian 2.5.1.
