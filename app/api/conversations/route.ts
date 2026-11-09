@@ -1,6 +1,6 @@
 import { requireApiAccess } from "@/lib/auth/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { HistoryError, listHistory, readHistory, saveHistory, validateHistoryWrite } from "@/lib/chat-history-store";
+import { HistoryError, deleteHistory, listHistory, readHistory, saveHistory, validateHistoryWrite } from "@/lib/chat-history-store";
 import { SceneError } from "@/lib/scenes";
 import { readBoundedSceneBody } from "@/lib/scene-images";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
@@ -26,6 +26,13 @@ export async function GET(request: Request): Promise<Response> {
     if (!/^\d{1,15}$/.test(after) || !/^\d{1,6}$/.test(offset)) throw new HistoryError("Invalid history cursor.");
     const db = getSupabaseAdmin(AbortSignal.timeout(8000));
     return Response.json(params.has("id") ? await readHistory(db, params.get("id")!, after) : await listHistory(db, Number(offset)));
+  });
+}
+export async function DELETE(request: Request): Promise<Response> {
+  return historyApi(request, async () => {
+    const id = new URL(request.url).searchParams.get("id") ?? "";
+    await deleteHistory(getSupabaseAdmin(AbortSignal.timeout(8000)), id);
+    return Response.json({ ok: true });
   });
 }
 export async function PUT(request: Request): Promise<Response> {

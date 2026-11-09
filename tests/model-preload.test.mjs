@@ -29,9 +29,36 @@ test('cancelling one waiter leaves a shared preload alive for the remaining wait
   assert.equal(await second, 'cached');
 });
 
-test('preload queue prioritizes the selected model then works newest-first and continues after failures', async () => {
+test('background queue excludes the selected model (render path owns it) then works sequentially and continues after failures', async () => {
   const packages = ['older', 'newest', 'selected'].map(id => ({ id, assets: [], models: [{ id: `${id}:m` }] }));
   const order = [];
   await preloadModelPackages(packages, 'selected:m', async pack => { order.push(pack.id); if (pack.id === 'newest') throw new Error('offline'); }, new AbortController().signal);
-  assert.deepEqual(order, ['selected', 'newest', 'older']);
+  assert.deepEqual(order, ['newest', 'older']);
+});
+
+test('background queue skips packages that already hold in-memory assets', async () => {
+  const packages = [
+    { id: 'cached', assets: [new Blob(['x'])], models: [{ id: 'cached:m' }] },
+    { id: 'pending', assets: [], models: [{ id: 'pending:m' }] },
+  ];
+  const order = [];
+  await preloadModelPackages(packages, 'cached:m', async pack => { order.push(pack.id); }, new AbortController().signal);
+  assert.deepEqual(order, ['pending']);
+});
+
+test('background queue pauses while the active model is busy then resumes', async () => {
+  const packages = ['a', 'b'].map(id => ({ id, assets: [], models: [{ id: `${id}:m` }] }));
+  const order = [];
+  let busy = true;
+  const task = preloadModelPackages(
+    packages, 'a:m',
+    async pack => { order.push(pack.id); },
+    new AbortController().signal,
+    { isActiveBusy: () => busy },
+  );
+  await new Promise(resolve => setTimeout(resolve, 450));
+  assert.deepEqual(order, []);
+  busy = false;
+  await task;
+  assert.deepEqual(order, ['b']);
 });
