@@ -4,16 +4,17 @@ Meet Vivian, a shy, polite tsundere AI companion with her own opinions. She can 
 
 - **Live app:** [vivianlabs.vercel.app](https://vivianlabs.vercel.app)
 - **Alpha test:** Open through November 13, 2026.
-- **Source code:** [github.com/celestial-sora/ai-waifu](https://github.com/celestial-sora/ai-waifu)
-- **Built with:** Next.js, React, TypeScript, Supabase, and PixiJS
+- **Source code:** [github.com/celestia-sora/vivian](https://github.com/celestia-sora/vivian)
+- **Sign-in app:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) — `https://vivianauth.celestiasora.workers.dev`
+- **Built with:** Next.js, React, TypeScript, Supabase (app data), Cloudflare Workers + D1 (sign-in), PixiJS
 
 ## Get her running ✨
 
 You’ll need Git, Node.js 22.13 or newer, and npm. Then pop open a terminal and run:
 
 ```bash
-git clone https://github.com/celestial-sora/ai-waifu.git
-cd ai-waifu
+git clone https://github.com/celestia-sora/vivian.git
+cd vivian
 npm ci
 cp .env.example .env.local
 npm run dev
@@ -21,41 +22,44 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) and say hi 💜 On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`.
 
+Local preview without real sign-in: `NODE_ENV=development` + `DEV_BYPASS_LOGIN=true`. This bypass is never honored in production.
+
 ## Set up services
 
 Add service keys to `.env.local` to wake up the features you want. See [.env.example](.env.example) for the full list and defaults.
 
 | Service | Environment variables |
 | --- | --- |
-| Chat | `GROQ_API_KEY` (chat + memory); optional `GEMINI_API_KEY` for fallback, vision, and search |
-| Sign-in | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
-| Cloud memory | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
-| Voice input | `GROQ_API_KEY` |
+| Chat | `GROQ_API_KEY` (primary chat + memory); optional `GEMINI_API_KEY` for fallback and search |
+| Vision | Groq Qwen 3.8 27B vision only (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`) |
+| Sign-in | `VIVIANAUTH_URL` (default `https://vivianauth.celestiasora.workers.dev`) + `VIVIAN_INTERNAL_TOKEN` (must match vivianAuth's Cloudflare secret) |
+| Cloud memory & history | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
+| Voice input | `ELEVENLABS_API_KEY` |
 | Voice output | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` |
 | Search | `GEMINI_API_KEY`; optional `TAVILY_API_KEY` |
 | JEV decisions | `TYPESAFE_API_KEY` or `JEV_API_KEY` |
 | Cloud models and backgrounds | Optional Cloudflare R2 setup; see [R2 guide](docs/private-r2-storage.md) |
 
-Tiny but important: keep secret keys in server-side environment variables. Never put provider, service-role, or R2 secrets in variables starting with `NEXT_PUBLIC_` (｡•́︿•̀｡)
+Tiny but important: keep secret keys server-side only. Never put provider, service-role, or R2 secrets in variables starting with `NEXT_PUBLIC_` (｡•́︿•̀｡) `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are only for the Realtime config endpoint — Supabase is not used for sign-in.
 
 ## Sign-in & privacy 🔒
 
-Sign-in is delegated to the Cloudflare Workers app (vivianAuth, D1-backed): `https://vivianauth.celestiasora.workers.dev`. The app validates session tokens server-side via vivianAuth's `/api/verify` (set `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` on Vercel — same secret as on vivianAuth's Cloudflare secrets). Supabase is used only for app data (memory, chat history, scenes, voice prefs) — not for sign-in.
+Sign-in is delegated to the Cloudflare Workers app [vivianAuth](https://github.com/celestia-sora/vivianAuth) (D1-backed): `https://vivianauth.celestiasora.workers.dev`. The app validates session tokens server-side via vivianAuth's `POST /api/verify` — set `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` on Vercel (same secret as on vivianAuth's Cloudflare secrets). Flow: vivianAuth redirects with `#token=<session>` → stored in `localStorage vivian_auth_token` → sent as `Authorization: Bearer` on every API call → verified server-side (8s timeout, HTTPS only). Logout revokes via vivianAuth `POST /api/logout`. Supabase stores only app data (memory, chat history, scenes, voice prefs, custom instructions) — not sign-in.
 
 All authorized accounts share the same cloud memories, chat history, and companion relationship state. Chat history syncs through Supabase across devices, with a browser cache for unsynced messages. Imported Live2D models stay in that browser unless you choose to save them to private cloud storage.
 
-**Menu → Settings** includes sign-out and **Reset Vivian**. Reset clears shared cloud memories, conversation history, and relationship state, along with this device's chat history and local settings. It keeps imported models and does not sign you out.
+**Menu → Settings** includes sign-out and **Reset Vivian**. Reset clears shared cloud memories, conversation history, and relationship state, along with this device's chat history and local settings and the shared custom instructions. It keeps imported models and does not sign you out.
 
 Keep row-level security (RLS) enabled on Supabase memory tables, with no public read or write policies. The server checks account access before handling protected requests.
 
 ## What Vivian gets up to ♡
 
-- **Chat on her terms:** Groq’s Qwen 3.8 27B provides chat and GPT-OSS 20B handles memory extraction/compression; Gemini is the optional fallback for vision and search, but Vivian is intentionally not a general-purpose assistant. She can answer, tease, dodge, give half an answer, or refuse.
+- **Chat on her terms:** Groq’s Qwen 3.8 27B provides chat and GPT-OSS 20B handles memory extraction/compression; Gemini is the optional fallback for search, but Vivian is intentionally not a general-purpose assistant. She can answer, tease, dodge, give half an answer, or refuse.
 - **Chat history:** Conversations and messages sync through Supabase across devices under the existing shared companion identity. Local copies retain unsynced messages during outages. Existing device history is imported with stable IDs to prevent duplicates. Apply `supabase/migrations/20261006005533_cloud_conversation_history.sql` before deploying this feature.
 - **Remember:** Keeps durable relationship-relevant details and mood state. Secrets and sensitive one-off details aren’t saved automatically.
 - **Know things:** Search, Bangkok time/weather, calculation, and memory tools can give Vivian context. Tool results are knowledge, not an obligation to tell you the answer.
-- **See pictures:** Send an image or camera frame for Gemini to understand.
-- **Talk:** ElevenLabs Scribe v2 handles speech input and Eleven v4 generates speech output (set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`); the mic waits for 2.5 seconds of silence before sending. Vivian’s avatar lip-syncs while she talks. If voice or Live2D has a bad hair day, text chat still works.
+- **See pictures:** Send an image or camera frame. Vision runs on Groq Qwen 3.8 27B (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`) — no Gemini fallback.
+- **Talk:** ElevenLabs Scribe v2 handles speech input in the selected UI language (th/en/ja/ko/zh) and Eleven v4 generates speech output (set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`); the mic waits for 2.5 seconds of silence before sending. Vivian’s avatar lip-syncs while she talks. If voice or Live2D has a bad hair day, text chat still works.
 - **Personality:** Vivian uses the owned shy, polite tsundere persona prompt across dialogue providers, with Thai as the default language. Emotion tags guide ElevenLabs delivery and are removed from spoken words. She may initially deflect questions about herself and relent after 3–4 persistent follow-up turns on the same topic. Custom instructions adjust conversation preferences and apply to the next text or microphone turn.
 - **Chat in your language:** Automatic, Thai, English, Japanese, Korean, and Chinese.
 - **Set the scene:** Add your own labeled backgrounds. Scene images stay private and aren’t analyzed by AI.
@@ -84,7 +88,7 @@ Cloudflare R2 is optional. It stores private model packages and new scene images
 
 ## Main API routes
 
-All protected routes check sign-in and account access.
+All protected routes check sign-in via vivianAuth (`requireApiAccess`) and account access.
 
 | Route | What it does |
 | --- | --- |
@@ -92,7 +96,7 @@ All protected routes check sign-in and account access.
 | `/api/conversations` | GET paginated shared conversations/messages; PUT validated, idempotent message batches |
 | `/api/custom-instructions` | GET/PATCH the shared custom instructions used by every device |
 | `/api/memory` | Read and manage memories and conversation data |
-| `/api/stt` | Convert speech to text |
+| `/api/stt` | Convert speech to text (UI language honored) |
 | `/api/tts` | Generate speech audio |
 | `/api/scenes/*` | Manage backgrounds |
 | `/api/models/*` | Manage private Live2D models |
@@ -111,9 +115,11 @@ Performance checks: `npm run test:performance` and `npm run test:performance:bro
 
 Run feature tests with scripts such as `npm run test:auth`, `npm run test:jev`, `npm run test:models`, `npm run test:scenes`, and `npm run test:storage`. Some integration tests need local fixtures or PostgreSQL; check the relevant docs first. Do not point tests at production data.
 
+Apply required Supabase migrations before deploying features — especially `20261006005533_cloud_conversation_history.sql` (chat history), `20261105090000_custom_instructions.sql` (custom instructions), `20261107120000_drop_auth_fk.sql` (D1 identities), `20261107133000_model_expression_preferences.sql`, and `20261105200000_voice_id_preference.sql`. See [R2 guide](docs/private-r2-storage.md), [Dynamic scenes](docs/dynamic-scenes.md), [JEV architecture](docs/jev-decision-layer.md), and [Thai TTS audit](docs/tts-thai.md) for feature details.
+
 ## Project folders
 
-- `app/` — Pages, sign-in flow, and API routes
+- `app/` — Pages, sign-in hop shim, and API routes
 - `lib/` — Chat, memory, authentication, Live2D, and storage logic
 - `supabase/migrations/` — Database changes
 - `docs/` — Setup and architecture guides
@@ -123,7 +129,8 @@ Run feature tests with scripts such as `npm run test:auth`, `npm run test:jev`, 
 - Live2D uses PixiJS 6 and `pixi-live2d-display/cubism4`. Keep PixiJS on version 6.
 - Load Live2D in the browser only; Cubism Core must load before the model.
 - Keep provider credentials and service-role keys on the server.
-- Require confirmed Supabase accounts for protected app access.
+- Require confirmed D1 accounts (verified via vivianAuth `/api/verify`) for protected app access. Confirmed means a non-anonymous user with a verified email.
+- Verify bearer tokens, never trust client-supplied identity or claims.
 - Optional services can fail without stopping text chat.
 
 ## License and assets

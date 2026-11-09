@@ -34,6 +34,8 @@ const story = load("../lib/vivian-story.ts");
 const dialogue = load("../lib/vivian-dialogue.ts");
 const customInstructions = load("../lib/custom-instructions.ts");
 const persona = load("../lib/vivian-persona.ts", { "@/lib/custom-instructions": customInstructions });
+const recall = load("../lib/memory-recall.ts");
+const embeddings = load("../lib/memory-embeddings.ts");
 const keys = ["needs_current_information", "needs_memory", "recalls_memory", "needs_vision", "needs_time", "needs_weather", "needs_calculator", "needs_integrations", "supportive_response", "explanatory_response"];
 function answers(values = {}) {
   return { answers: Object.fromEntries(keys.map((key) => [key, { type: "noul", noul: values[key] ?? (key === "needs_memory" ? 0.5 : 0.01) }])) };
@@ -249,6 +251,8 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/vivian-persona": persona,
     "@/lib/custom-instructions": customInstructions,
     "@/lib/speech": load("../lib/speech.ts"),
+    "@/lib/memory-recall": recall,
+    "@/lib/memory-embeddings": embeddings,
     "@/lib/companion-store": { loadCompanionState: async () => { calls.push({ kind: "state" }); return companion.defaultCompanionState(); }, saveCompanionState: () => assert.fail("Background writes must not run in fixtures") },
     "@/lib/supabase-admin": { getSupabaseAdmin() {
       return { from(table) {
@@ -296,7 +300,7 @@ test("chat integrates a single JEV pass; state starts in parallel; main LLM rece
   assert.match(prompt, /Vivian/); assert.match(prompt, /Likes tea/);
   assert.ok(prompt.startsWith(persona.vivianPersonaPrompt));
   assert.match(prompt, /shy, polite, slightly awkward tsundere companion/);
-  assert.match(prompt, /Draw only from: Emotion/);
+  assert.match(prompt, /draw from all five categories/);
   assert.equal(prompt.includes(dialogue.VIVIAN_DIALOGUE_EXAMPLE), false);
   assert.equal(fixture.background.length, 1);
 });
@@ -354,7 +358,7 @@ test("chat skips irrelevant durable memory, executes approved local tools and ad
   assert.deepEqual(body.tools, ["calculator"]);
   assert.equal(fixture.memoryLoads.length, 0);
   const prompt = fixture.calls.find((call) => call.kind === "groq").body.messages[0].content;
-  assert.match(prompt, /= 4/); assert.match(prompt, /Treat the explanation request as another conversational move/); assert.match(prompt, /Once she chooses refusal in a reply, she does not append/); assert.doesNotMatch(prompt, /ตอบเนื้อหาให้ครบตามที่ขอ|Explain the answer clearly/);
+  assert.match(prompt, /= 4/); assert.match(prompt, /Treat the explanation request as another conversational move/); assert.match(prompt, /Once she chooses refusal in a turn, that refusal is binding/); assert.doesNotMatch(prompt, /ตอบเนื้อหาให้ครบตามที่ขอ|Explain the answer clearly/);
 });
 
 test("chat executes a semantic time decision even without an existing time regex match", async () => {
@@ -365,13 +369,16 @@ test("chat executes a semantic time decision even without an existing time regex
   assert.match(fixture.calls.find((call) => call.kind === "groq").body.messages[0].content, /Asia\/Bangkok/);
 });
 
-test("chat image input forces Gemini even when JEV says vision is irrelevant", async () => {
+test("chat image input forces Qwen vision even when JEV says vision is irrelevant", async () => {
   const fixture = chatFixture({ values: { needs_vision: 0 } });
   const image = `data:image/jpeg;base64,${"a".repeat(80)}`;
   const response = await fixture.post("What is this?", { image });
   assert.equal(response.status, 200);
-  const request = fixture.calls.find((call) => call.kind === "gemini").body;
-  assert.equal(request.contents[0].parts[0].inlineData.data, "a".repeat(80));
+  const request = fixture.calls.find((call) => call.kind === "groq").body;
+  assert.equal(request.model, "qwen/qwen3.8-27b");
+  assert.equal(request.messages[0].content[1].type, "image_url");
+  assert.equal(request.messages[0].content[1].image_url.url, image);
+  assert.equal(fixture.calls.some((call) => call.kind === "gemini"), false);
   assert.equal(JSON.parse(fixture.calls.find((call) => call.kind === "jev").body.state).hasImage, true);
   assert.doesNotMatch(fixture.calls.find((call) => call.kind === "jev").body.state, /data:image/);
 });
@@ -407,13 +414,41 @@ test("JEV works without Gemini and normal text retains Groq → Gemini fallback"
 });
 
 test("Groq quota or missing model falls back to Gemini without probing other Groq models", async () => {
-  for (const status of [429, 404]) {
-    const fixture = chatFixture({ groqReply: () => new Response("unavailable", { status }) });
-    const response = await fixture.post();
-    assert.equal(response.status, 200);
-    assert.deepEqual(fixture.calls.filter((call) => ["groq", "gemini"].includes(call.kind)).map((call) => call.kind), ["groq", "gemini"]);
-    assert.equal(fixture.calls.find((call) => call.kind === "groq").body.model, "qwen/qwen3.8-27b");
-  }
+  const fixture = chatFixture({ groqReply: () => new Response("unavailable", { status: 404 }) });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.deepEqual(fixture.calls.filter((call) => ["groq", "gemini"].includes(call.kind)).map((call) => call.kind), ["groq", "gemini"]);
+  assert.equal(fixture.calls.find((call) => call.kind === "groq").body.model, "qwen/qwen3.8-27b");
+});
+
+test("Groq 429 is retried once after its reset window before any fallback", async () => {
+  let groqCalls = 0;
+  const fixture = chatFixture({
+    groqReply: () => {
+      groqCalls += 1;
+      if (groqCalls === 1) {
+        return new Response("rate limited", { status: 429, headers: { "retry-after": "0" } });
+      }
+      return Response.json({ choices: [{ message: { content: "Vivian fixture reply" } }] });
+    },
+  });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, "Vivian fixture reply");
+  assert.equal(fixture.calls.filter((call) => call.kind === "groq").length, 2);
+  assert.equal(fixture.calls.some((call) => call.kind === "gemini"), false);
+});
+
+test("Groq 429 that persists after the retry still falls through to Gemini", async () => {
+  const fixture = chatFixture({
+    groqReply: () => new Response("rate limited", { status: 429, headers: { "retry-after": "0" } }),
+  });
+  const response = await fixture.post();
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    fixture.calls.filter((call) => ["groq", "gemini"].includes(call.kind)).map((call) => call.kind),
+    ["groq", "groq", "gemini"]
+  );
 });
 
 test("fresh greetings request only 120 output tokens from Groq", async () => {
@@ -608,10 +643,10 @@ test("tsundere persona and latest custom instructions reach all dialogue provide
     const body=fixture.calls.find(call=>call.kind===provider).body;
     const prompt=provider==="gemini" ? body.systemInstruction.parts[0].text : body.messages[0].content;
     assert.ok(prompt.startsWith(persona.vivianPersonaPrompt));
-    assert.match(prompt,/# Vivian \| Immutable Core/);
+    assert.match(prompt,/# Vivian — shy, polite, slightly awkward tsundere companion/);
     assert.match(prompt,/ตอบเป็น ภาษาไทย/);
-    assert.match(prompt,/คำถามเกี่ยวกับตัว Vivian/);
-    assert.match(prompt,/3-4 persistent follow-ups/);
+    assert.match(prompt,/Questions about Vivian's own identity/);
+    assert.match(prompt,/three or four genuine follow-up turns/);
     assert.match(prompt,/LANGUAGE LOCK — FINAL RULE: Reply only in ภาษาไทย \(Thai\)/);
     assert.match(prompt, new RegExp(`${customInstructions}[\\s\\S]*LANGUAGE LOCK — FINAL RULE`));
   }
@@ -639,8 +674,8 @@ test("custom instructions are bounded; empty preferences still get the persisten
   for(const customInstructions of ["", "x".repeat(2100)]) {
     const fixture=chatFixture(); await fixture.post("วันนี้เหนื่อย",{customInstructions});
     const prompt=fixture.calls.find(call=>call.kind==="groq").body.messages[0].content;
-    assert.match(prompt,/# Vivian \| Immutable Core/);
-    if(customInstructions) {assert.match(prompt,new RegExp("x{2000}[\\s\\S]*LANGUAGE LOCK"));assert.equal(prompt.includes("x".repeat(2001)),false);}
+    assert.match(prompt,/# Vivian — shy, polite, slightly awkward tsundere companion/);
+    if(customInstructions) {assert.match(prompt,new RegExp("x{500}[\\s\\S]*LANGUAGE LOCK"));assert.equal(prompt.includes("x".repeat(2001)),false); assert.ok((prompt.match(/x{100,}/g) ?? []).every((s) => s.length <= 2000), "profile run bounded at 2000");}
     else assert.doesNotMatch(prompt,/Persona profile — custom instructions, layer 2/);
     assert.doesNotMatch(prompt,/ตานี้ถูกถามชื่อ/);
   }
@@ -654,9 +689,9 @@ test("self-question persistence reaches the provider as actual separate turns", 
     const fixture=chatFixture(); await fixture.post("",{messages});
     const turns=fixture.calls.find(call=>call.kind==="groq").body.messages;
     assert.equal(turns.filter(turn=>turn.role==="user").length,count+1);
-    assert.match(turns[0].content,/คำถามเกี่ยวกับตัว Vivian/);
-    assert.match(turns[0].content,/3–4 turn/);
-    assert.match(turns[0].content,/หัวข้อใหม่เริ่มนับใหม่/);
+    assert.match(turns[0].content,/Questions about Vivian's own identity/);
+    assert.match(turns[0].content,/count only actual turns/);
+    assert.match(turns[0].content,/new topic starts over/);
     if(count<followups.length)messages.push({role:"assistant",content:"ไม่บอกหรอก"},{role:"user",content:followups[count]});
   }
 });

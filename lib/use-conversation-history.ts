@@ -166,6 +166,29 @@ export function useConversationHistory(initial: HistoryMessage, pendingText: str
     state.current.conversations = [];
     try { localStorage.removeItem(HISTORY_CACHE_KEY); localStorage.removeItem(HISTORY_ACTIVE_KEY); } catch { /* Optional cache. */ }
   }, [setConversations, setActiveConversationId, setMessages, setNotice]);
+  // removeConversation deletes exactly one thread: best-effort cloud DELETE
+  // (best-effort only — local deletion always succeeds), cache update, and a
+  // safe fallback when the active conversation is the one removed.
+  const removeConversation = useCallback((id: string) => {
+    const remaining = state.current.conversations.filter((item) => item.id !== id);
+    acknowledged.current.forEach((messageId) => {
+      const owner = state.current.conversations.find((item) => item.messages.some((message) => message.id === messageId));
+      if (owner?.id === id) acknowledged.current.delete(messageId);
+    });
+    known.current.delete(id);
+    const wasActive = state.current.activeConversationId === id;
+    const nextId = wasActive ? crypto.randomUUID() : state.current.activeConversationId;
+    setConversations(remaining);
+    if (wasActive) {
+      setActiveConversationId(nextId);
+      setMessages([initialRef.current]);
+    }
+    state.current.conversations = remaining;
+    try {
+      localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(remaining));
+      localStorage.setItem(HISTORY_ACTIVE_KEY, nextId);
+    } catch { /* Cloud remains the source of truth. */ }
+  }, [setConversations, setActiveConversationId, setMessages]);
   const resume = useCallback(() => { paused.current = false; }, []);
-  return { messages, setMessages, conversations, activeConversationId, setActiveConversationId, ready, notice, refresh, pause, clear, resume, isCloudConversation: (id: string) => known.current.has(id) };
+  return { messages, setMessages, conversations, activeConversationId, setActiveConversationId, ready, notice, refresh, pause, clear, removeConversation, resume, isCloudConversation: (id: string) => known.current.has(id) };
 }

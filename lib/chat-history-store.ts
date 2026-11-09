@@ -22,6 +22,11 @@ export async function saveHistory(db: SupabaseClient, input: HistoryWrite): Prom
   });
   if (error) throw new HistoryError(error.code === "P0002" ? "Conversation no longer exists. Start a new conversation." : "Chat history is temporarily unavailable.", error.code === "P0002" ? 409 : 503);
 }
+export async function deleteHistory(db: SupabaseClient, id: string): Promise<void> {
+  if (!historyUuid(id)) throw new HistoryError("Invalid conversation ID.");
+  const { error } = await db.from("conversations").delete().eq("id", id).eq("user_key", "default");
+  if (error) throw new HistoryError("Chat history is temporarily unavailable.", 503);
+}
 export async function listHistory(db: SupabaseClient, offset: number) {
   const { data, error } = await db.from("conversations").select("id,title,updated_at").eq("user_key", "default").order("updated_at", { ascending: false }).order("id").range(offset, offset + 49);
   if (error) throw new HistoryError("Chat history is temporarily unavailable.", 503);

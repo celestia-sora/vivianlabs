@@ -30,3 +30,6 @@ export async function fetchHistory(signal?: AbortSignal): Promise<HistoryConvers
 export async function appendHistory(conversation: HistoryConversation, messages: HistoryMessage[], create: boolean): Promise<void> {
   await requestHistory("/api/conversations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: conversation.id, title: conversation.title, messages, create }) });
 }
+export async function deleteCloudHistory(id: string): Promise<void> {
+  await requestHistory(`/api/conversations?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+}

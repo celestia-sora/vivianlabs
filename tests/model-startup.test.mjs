@@ -28,6 +28,7 @@ function startup({ local = [pack('local')], saved = 'local:model', interrupted =
     refreshSnapshots: () => {},
     modelCloudRequestRef: { current: null }, accountId: 'account',
     modelPreloadAbortRef: { current: null },
+    startupModelResolvedRef: { current: false },
     localStorage: storage({ 'vivian-local-model': saved }), sessionStorage: storage(interrupted),
     shouldPauseModelStartup,
     isModelVisible: (pack, accountId) => !pack.cloudOwner || pack.cloudOwner === accountId || pack.cloudOwner === 'shared',
@@ -40,6 +41,7 @@ function startup({ local = [pack('local')], saved = 'local:model', interrupted =
     setCloudLibrary: (value) => { state.cloud = value; },
     setModelPaused: (value) => { state.paused = value; },
     setModelStatus: (value) => { state.status = value; },
+    setStartupModelPending: (value) => { state.startupPending = value; },
     setModelNotice: (value) => { state.notice = typeof value === 'function' ? value(state.notice) : value; },
     cloudModelPlaceholder: (model) => pack(model.id),
   };
