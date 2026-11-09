@@ -61,8 +61,9 @@ test("manual selection persists; OFF keeps it, ON applies a validated batched JE
   const off = await chat(); assert.equal(off.status, 200); assert.equal((await off.json()).scene.change, false);
   assert.equal((await (await call("/api/scenes")).json()).preferences.activeSceneId, otherScene.id);
   await call("/api/scenes/preferences", json({ autoScene: true }, "PATCH"));
-  const on = await chat(); const reply = await on.json(); assert.equal(on.status, 200, JSON.stringify(reply)); assert.equal(reply.scene.id, scene.id);
-  const requests = fixture.modelRequests.filter((request) => request.kind === "jev"); assert.equal(requests.length, 2); assert.equal(Object.keys(requests[1].body.questions).length, 11);
+  // Auto switching is disabled: requesting ON is coerced off and chat never switches.
+  const on = await chat(); const reply = await on.json(); assert.equal(on.status, 200, JSON.stringify(reply)); assert.equal(reply.scene.change, false);
+  const requests = fixture.modelRequests.filter((request) => request.kind === "jev"); assert.equal(requests.length, 2); assert.equal(Object.keys(requests[1].body.questions).length, 10);
   assert.doesNotMatch(JSON.stringify(fixture.modelRequests), /image_key|imageUrl|imageKey|thumbnailUrl|\/api\/scenes|\/storage\/|data:image/);
   fixture.state.dbFailure = true;
   const failedSceneChat = await chat(); assert.equal(failedSceneChat.status, 200); const failure = await failedSceneChat.json(); assert.equal(failure.scene.change, false); assert.ok(failure.text); fixture.state.dbFailure = false;

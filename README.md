@@ -60,7 +60,7 @@ Keep row-level security (RLS) enabled on Supabase memory tables, with no public 
 - **Know things:** Search, Bangkok time/weather, calculation, and memory tools can give Vivian context. Tool results are knowledge, not an obligation to tell you the answer.
 - **See pictures:** Send an image or camera frame. Vision runs on Groq Qwen 3.8 27B (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`) — no Gemini fallback.
 - **Talk:** ElevenLabs Scribe v2 handles speech input in the selected UI language (th/en/ja/ko/zh) and Eleven v4 generates speech output (set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`); the mic waits for 2.5 seconds of silence before sending. Vivian’s avatar lip-syncs while she talks. If voice or Live2D has a bad hair day, text chat still works.
-- **Personality:** Vivian uses the owned shy, polite tsundere persona prompt across dialogue providers, with Thai as the default language. Emotion tags guide ElevenLabs delivery and are removed from spoken words. She may initially deflect questions about herself and relent after 3–4 persistent follow-up turns on the same topic. Custom instructions adjust conversation preferences and apply to the next text or microphone turn.
+- **Personality:** Vivian uses the owned shy, polite tsundere persona prompt across dialogue providers, with Thai as the default language. A leading Emotion tag is mandatory for voice; it guides ElevenLabs delivery, drives Live2D face sync, and is removed from spoken words. She may initially deflect questions about herself and relent after 3–4 persistent follow-up turns on the same topic. Custom instructions adjust conversation preferences and apply to the next text or microphone turn.
 - **Chat in your language:** Automatic, Thai, English, Japanese, Korean, and Chinese.
 - **Set the scene:** Add your own labeled backgrounds. Scene images stay private and aren’t analyzed by AI.
 
@@ -68,7 +68,7 @@ External app actions are currently unavailable. MCP servers have not been connec
 
 ### A little extra smarts: JEV
 
-JEV is an optional decision service. It decides when fresh information, memory, supported tools, or an automatic scene may be relevant; it never decides that Vivian owes the user a useful answer. Vivian's main language model still writes the conversation. JEV receives a small amount of recent chat text and feature availability, not stored memories, images, audio, or secret keys. If JEV is unavailable, chat uses its regular routing. See [JEV architecture](docs/jev-decision-layer.md).
+JEV is an optional decision service. It decides when fresh information, memory, or supported tools may be relevant; it never decides that Vivian owes the user a useful answer. Vivian's main language model still writes the conversation. JEV receives a small amount of recent chat text and feature availability, not stored memories, images, audio, or secret keys. If JEV is unavailable, chat uses its regular routing. See [JEV architecture](docs/jev-decision-layer.md).
 
 ## Give Vivian a look ✨
 
@@ -80,7 +80,7 @@ Model files are not included in Git or the deployment. Do not put licensed model
 
 ## Make her space yours 🌷
 
-Add a scene in **Scenes** with a short label and a JPG, PNG, WebP, or AVIF image, or import an image from an HTTP(S) URL. Vivian uses the label to identify the scene; it does not inspect the image. **AI Auto Scene** is off by default.
+Add a scene in **Scenes** with a short label and a JPG, PNG, WebP, or AVIF image, or import an image from an HTTP(S) URL. Vivian uses the label to identify the scene; it does not inspect the image. Scenes are manual-only for now — pick one in **Scenes**; automatic switching is disabled.
 
 Scenes need the migration `20261003032056_dynamic_scenes.sql` applied to Vivian's Supabase project. See [Dynamic scenes](docs/dynamic-scenes.md) for details.
 

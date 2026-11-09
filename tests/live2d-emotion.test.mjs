@@ -30,6 +30,30 @@ test("distress outranks flustered words and idle tired keeps the tea rest", () =
   assert.equal(go("พักหน่อยนะ", "", "tired", 80, false), "tired");
 });
 
+test("leading tag wins over conflicting text and mood", () => {
+  assert.equal(go("[playful] เศร้าจัง sad", "เศร้าต้องการกำลังใจ", "melancholy", 90), "tease");
+  assert.equal(go("[playful] โกรธ", "", "melancholy", 90), "tease");
+  assert.equal(go("[sad] ตาบ้าเอ๊ย หยอก", "", "playful", 80), "sad");
+});
+
+test("every built-in ElevenLabs emotion tag resolves to a non-null emotion", () => {
+  const expected = { weak: "tired", angry: "angry", bored: "tired", menacing: "angry", playful: "tease", tired: "tired", excited: "happy", amazed: "surprised", powerful: "angry", proud: "happy", optimistic: "happy", startled: "surprised", mad: "angry", aggressive: "angry", bitter: "angry", critical: "angry", repelled: "angry", anxious: "sad", stressed: "sad", scared: "sad", threatened: "sad", vulnerable: "sad", confused: "confused", busy: "thinking", distant: "calm", despair: "sad", "let down": "sad", peaceful: "calm", content: "happy", curious: "confused", thoughtful: "thinking", trusting: "love" };
+  assert.equal(Object.keys(expected).length, 32);
+  for (const [tag, emotion] of Object.entries(expected)) {
+    assert.equal(go(`[${tag}] ได้เลย`, "", "calm"), emotion, `tag [${tag}] -> ${emotion}`);
+  }
+});
+
+test("Nariell auto-expression denylist never returns color names", () => {
+  const nariell = ["color change 1", "color eyes 1", "color hair 1", "tail onoff", "chibi onoff", "closed eyes", "arm updown", "blush", "cry", "scared", "heart eyes"];
+  assert.equal(resolveLive2DExpression("eyes", nariell), "closed eyes");
+  assert.equal(resolveLive2DExpression("eyes", ["color eyes 1", "color eyes 2"]), null);
+  assert.equal(resolveLive2DExpression("hair", ["color hair 1", "color hair 2"]), null);
+  assert.equal(resolveLive2DExpression("sad", ["color change 1", "cry"]), "cry");
+  assert.equal(resolveLive2DExpression("calm", ["chibi onoff", "tail onoff"]), null);
+  assert.equal(resolveLive2DExpression("eyes", ["color eyes 1", "heart eyes"]), "heart eyes");
+});
+
 test("miss map, generic models and motions resolve", () => {
   assert.equal(resolveLive2DExpression("blush", ["#", "M lianhong", "M miyan"]), "M lianhong");
   assert.equal(resolveLive2DExpression("happy", ["#", "M miyan"]), "M miyan");

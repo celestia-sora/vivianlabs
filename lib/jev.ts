@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SceneDecision } from "@/lib/scenes";
+import { AUTO_SCENE_ENABLED } from "@/lib/scenes";
 
 export const jevConfidenceThreshold = 0.85;
 // Scene changes are presentation-only (no tools, memory or permissions), so
@@ -147,7 +148,7 @@ export async function decideVivian(context: JevContext): Promise<JevResult> {
   const apiKey = process.env.TYPESAFE_API_KEY?.trim() || process.env.JEV_API_KEY?.trim();
   const signal = AbortSignal.timeout(2000);
   // Explicit projection excludes accidental image URLs/keys or extra metadata.
-  const scenes = context.scenes?.autoScene
+  const scenes = AUTO_SCENE_ENABLED && context.scenes?.autoScene
     ? context.scenes.available.slice(0, 50).filter((scene) => scene.id !== context.scenes?.activeSceneId).map((scene) => ({ id: scene.id, label: [...scene.label].slice(0, 50).join("") })) : [];
   const questions: Record<string, { type: "noul"; instructions: string }> = Object.fromEntries(Object.entries(instructions).map(([key, instructions]) => [key, { type: "noul", instructions }]));
   scenes.forEach((scene, index) => {

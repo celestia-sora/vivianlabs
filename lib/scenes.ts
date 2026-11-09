@@ -2,6 +2,9 @@
 export const SCENE_MAX_BYTES = 8 * 1024 * 1024;
 export const SCENE_MAX_COUNT = 50;
 export const SCENE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
+// Auto scene switching is disabled. Manual scene selection, save, preset and
+// delete keep working; mentioning a label no longer changes the background.
+export const AUTO_SCENE_ENABLED = false;
 export interface VivianScene {
   id: string;
   label: string;

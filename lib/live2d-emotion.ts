@@ -44,6 +44,11 @@ const TAG_TO_EMOTION: Record<string, Live2DEmotion> = {
   anxious: "sad", tired: "tired", startled: "surprised", sad: "sad", excited: "happy",
   happy: "happy", laughs: "laugh", chuckles: "laugh", sighs: "tired", exhales: "tired",
   whispers: "calm", softly: "calm", quietly: "calm", shouts: "angry", rushed: "surprised",
+  weak: "tired", angry: "angry", bored: "tired", menacing: "angry", amazed: "surprised",
+  powerful: "angry", proud: "happy", optimistic: "happy", mad: "angry", aggressive: "angry",
+  bitter: "angry", critical: "angry", repelled: "angry", stressed: "sad", scared: "sad",
+  threatened: "sad", vulnerable: "sad", confused: "confused", busy: "thinking", distant: "calm",
+  despair: "sad", "let down": "sad", peaceful: "calm", trusting: "love",
 };
 
 // ElevenLabs Character cues are free-form ("slightly flustered, trying to
@@ -93,6 +98,14 @@ export function detectLive2DEmotion(options: {
   intensity: number;
   idle?: boolean;
 }): Live2DEmotion {
+  // Leading voice tag always wins: voice and face must match. Only fall back
+  // to mood/text/character-cue scoring when no direct Emotion tag leads.
+  const tags = extractEmotionTags(options.reply);
+  if (tags[0]) {
+    const leadingKey = tags[0].toLowerCase().split(/[,]/)[0].trim();
+    const leading = TAG_TO_EMOTION[leadingKey];
+    if (leading) return leading;
+  }
   const combined = `${options.reply} ${options.userText}`;
   const scores = new Map<Live2DEmotion, number>();
   const add = (emotion: Live2DEmotion, value: number) => scores.set(emotion, (scores.get(emotion) ?? 0) + value);
@@ -169,14 +182,27 @@ const GENERIC_EXPRESSION_PATTERNS: Record<Live2DEmotion, RegExp> = {
   calm: /neutral|normal|default|calm|idle|#|平常|通常|ปกติ|ปกติ|สงบ/i,
 };
 
+// Nariell exclusions for auto-picking only: never return these from
+// resolveLive2DExpression() even if a generic pattern would match. "color eyes"
+// must not hit the eyes pattern and "color hair" must not hit the hair pattern,
+// so the denylist runs before generic matching. Manual /expression (direct
+// name lookup in companion.tsx) is unaffected.
+const AUTO_EXPRESSION_DENYLIST = new Set([
+  "color change 1", "color change 2", "color change 3",
+  "color eyes 1", "color eyes 2", "color eyes 3",
+  "color hair 1", "color hair 2", "color hair 3",
+  "tail onoff", "chibi onoff",
+]);
+
 export function resolveLive2DExpression(emotion: Live2DEmotion, supported: readonly string[]): string | null {
+  const allowed = supported.filter((name) => !AUTO_EXPRESSION_DENYLIST.has(name.trim().toLowerCase()));
   const exact = MISS_EXPRESSION_BY_EMOTION[emotion] ?? [];
   for (const name of exact) {
-    const hit = supported.find((item) => item.trim() === name.trim());
+    const hit = allowed.find((item) => item.trim() === name.trim());
     if (hit) return hit;
   }
   const pattern = GENERIC_EXPRESSION_PATTERNS[emotion];
-  return supported.find((name) => pattern.test(name)) ?? null;
+  return allowed.find((name) => pattern.test(name)) ?? null;
 }
 
 const GENERIC_MOTION_PATTERNS: Record<Live2DEmotion, RegExp> = {

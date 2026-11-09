@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/auth/fetch";
 import { notifyStorageChanged } from "@/lib/storage-status";
 import type { SceneDecision, ScenePreferences, VivianScene } from "@/lib/scenes";
+import { AUTO_SCENE_ENABLED } from "@/lib/scenes";
 
 import { startTiming, cancelTiming, type LocalTiming } from "@/lib/performance";
 import { preloadSceneLibrary } from "@/lib/scene-preload";
@@ -99,7 +100,7 @@ export function useSceneLibrary(presetImages: string[] = noPresetImages, account
     return updatePreferences({ activeSceneId: id });
   }
   function applyChatScene(decision: SceneDecision | undefined, requestGeneration: number) {
-    if (generation.current !== requestGeneration || !preferencesRef.current.autoScene || !decision?.change) return;
+    if (!AUTO_SCENE_ENABLED || generation.current !== requestGeneration || !preferencesRef.current.autoScene || !decision?.change) return;
     const scene = scenesRef.current.find((item) => item.id === decision.id);
     if (!scene) return;
     // Server decisions already persisted the preference; presentation stays local.
