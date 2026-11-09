@@ -9,6 +9,7 @@ function fixture(failDelete = null, ignoreDelete = null) {
     memories: [{ user_key: "default" }, { user_key: "other" }],
     companion_state: [{ user_key: "default", conversation_summary: "old" }, { user_key: "other" }],
     vivian_custom_instructions: [{ id: "global", instructions: "call me Sora" }],
+    custom_instruction_versions: [{ id: 1, instructions: "call me Sora" }],
   };
   const client = { from(table) {
     let deleting = false;
@@ -32,7 +33,7 @@ function fixture(failDelete = null, ignoreDelete = null) {
   return { client, rows };
 }
 
-test("full reset removes the requested identity's history, memory, relationship, and shared custom instructions", async () => {
+test("full reset removes the requested identity's history, memory, and relationship — but KEEPS custom instructions (D7)", async () => {
   const { client, rows } = fixture();
   await resetCompanionData(client, "default");
   assert.deepEqual(rows.messages, [{ conversation_id: "b" }]);
@@ -40,9 +41,12 @@ test("full reset removes the requested identity's history, memory, relationship,
     assert.equal(rows[name].length, 1);
     assert.equal(rows[name][0].user_key, "other");
   }
-  assert.equal(rows.vivian_custom_instructions.length, 0);
+  // D7: persona persists across Reset.
+  assert.deepEqual(rows.vivian_custom_instructions, [{ id: "global", instructions: "call me Sora" }]);
+  assert.deepEqual(rows.custom_instruction_versions, [{ id: 1, instructions: "call me Sora" }]);
   await resetCompanionData(client, "default");
   assert.equal(rows.messages.length, 1);
+  assert.equal(rows.vivian_custom_instructions.length, 1);
 });
 
 test("an upstream failure is reported and a retry finishes the remaining reset", async () => {
@@ -54,6 +58,7 @@ test("an upstream failure is reported and a retry finishes the remaining reset",
   await resetCompanionData(client, "default");
   assert.equal(rows.memories.length, 1);
   assert.equal(rows.companion_state.length, 1);
+  assert.equal(rows.vivian_custom_instructions.length, 1);
 });
 
 test("reset refuses an unspecified identity", async () => {

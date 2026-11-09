@@ -15,12 +15,13 @@ export async function resetCompanionData(supabase: SupabaseClient, userKey: stri
     const result = await supabase.from(table).delete().eq("user_key", userKey);
     if (result.error) throw result.error;
   }
-  // Custom instructions are one shared singleton, not identity-scoped.
-  const instructions = await supabase.from("vivian_custom_instructions").delete().eq("id", "global");
-  if (instructions.error) throw instructions.error;
+  // D7 (owner confirmed 2026-11-09): Reset Vivian KEEPS custom instructions.
+  // The persona profile stored in vivian_custom_instructions (and its
+  // custom_instruction_versions history) persists across Reset; clearing
+  // custom instructions is a separate explicit action in Settings.
+  // (Previously Reset deleted the singleton here — removed in Phase 3.)
   const checks = await Promise.all(["conversations", "memories", "companion_state"].map(table =>
     supabase.from(table).select("*", { count: "exact", head: true }).eq("user_key", userKey)));
-  checks.push(await supabase.from("vivian_custom_instructions").select("*", { count: "exact", head: true }).eq("id", "global"));
   if (ids.length) checks.push(await supabase.from("messages").select("*", { count: "exact", head: true }).in("conversation_id", ids));
   for (const check of checks) {
     if (check.error) throw check.error;
