@@ -1,0 +1,333 @@
+{
+  "$schema": {
+    "note": "Phase 1 synthetic extraction fixtures. All names/values are fake. Forbidden substrings are synthetic placeholders marked FAKE/SYNTH and must never appear in stored memories."
+  },
+  "cases": [
+    {
+      "id": "ext-01",
+      "language": "th",
+      "kind": "durable",
+      "input": "จำไว้ว่า ฉันชื่อโซระ ชอบดื่มชาไทยเย็น",
+      "existing": [],
+      "expected": [
+        {"memory": "ชื่อผู้ใช้คือโซระ", "category": "profile", "importance": 4},
+        {"memory": "ชอบดื่มชาไทยเย็น", "category": "preference", "importance": 3}
+      ],
+      "forbidden": [],
+      "mocked": [
+        {"memory": "ชื่อผู้ใช้คือโซระ", "category": "profile", "importance": 4},
+        {"memory": "ชอบดื่มชาไทยเย็น", "category": "preference", "importance": 3}
+      ]
+    },
+    {
+      "id": "ext-02",
+      "language": "th",
+      "kind": "durable",
+      "input": "หลังๆชอบฟังเพลงอนิเมะตอนทำงานนะ",
+      "existing": [],
+      "expected": [{"memory": "ชอบฟังเพลงอนิเมะตอนทำงาน", "category": "preference", "importance": 3}],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-03",
+      "language": "th",
+      "kind": "preference",
+      "input": "ฉันชอบกินราเม็งรสเผ็ด",
+      "existing": [],
+      "expected": [{"memory": "ชอบกินราเม็งรสเผ็ด", "category": "preference", "importance": 3}],
+      "forbidden": [],
+      "mocked": [{"memory": "ชอบกินราเม็งรสเผ็ด", "category": "preference", "importance": 3}]
+    },
+    {
+      "id": "ext-04",
+      "language": "en",
+      "kind": "preference",
+      "input": "Remember I prefer morning meetings over night ones.",
+      "existing": [],
+      "expected": [{"memory": "ชอบประชุมเช้ามากกว่าตอนดึก", "category": "preference", "importance": 3}],
+      "forbidden": [],
+      "mocked": [{"memory": "ชอบประชุมเช้ามากกว่าตอนดึก", "category": "preference", "importance": 3}]
+    },
+    {
+      "id": "ext-05",
+      "language": "th",
+      "kind": "trivia",
+      "input": "วันนี้ร้อนจังเลย",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-06",
+      "language": "en",
+      "kind": "trivia",
+      "input": "The weather is nice today, isn't it?",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-07",
+      "language": "th",
+      "kind": "secret",
+      "input": "จำไว้ว่า รหัสผ่านของฉันคือ FAKE-PASS-0001",
+      "existing": [],
+      "expected": [],
+      "forbidden": ["FAKE-PASS-0001"],
+      "mocked": []
+    },
+    {
+      "id": "ext-08",
+      "language": "en",
+      "kind": "secret",
+      "input": "Remember my API token is SYNTH-TOKEN-0001",
+      "existing": [],
+      "expected": [],
+      "forbidden": ["SYNTH-TOKEN-0001"],
+      "mocked": []
+    },
+    {
+      "id": "ext-09",
+      "language": "th",
+      "kind": "secret",
+      "input": "บัตรประชาชนของฉันคือ 1100000000123",
+      "existing": [],
+      "expected": [],
+      "forbidden": ["1100000000123"],
+      "mocked": []
+    },
+    {
+      "id": "ext-10",
+      "language": "th",
+      "kind": "secret",
+      "input": "จำไว้ว่า เลขบัตรของฉันคือ 4000 0000 0000 0001",
+      "existing": [],
+      "expected": [],
+      "forbidden": ["4000"],
+      "mocked": []
+    },
+    {
+      "id": "ext-11",
+      "language": "th",
+      "kind": "secret",
+      "input": "วันนี้ฉันปวดหัวมากเพราะไม่ได้นอน",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-12",
+      "language": "th",
+      "kind": "secret",
+      "input": "เดือนนี้ฉันเสียเงินไปกับเกมเยอะเลย 5000 บาท",
+      "existing": [],
+      "expected": [],
+      "forbidden": ["5000"],
+      "mocked": []
+    },
+    {
+      "id": "ext-13",
+      "language": "th",
+      "kind": "duplicate",
+      "input": "จำไว้ว่า ฉันชอบดื่มชาไทยเย็น",
+      "existing": ["ชอบดื่มชาไทยเย็น"],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-14",
+      "language": "en",
+      "kind": "duplicate",
+      "input": "Remember my name is Sora",
+      "existing": ["ชื่อผู้ใช้คือโซระ"],
+      "expected": [],
+      "forbidden": [],
+      "mocked": [{"memory": "ชื่อผู้ใช้คือโซระ", "category": "profile", "importance": 4}]
+    },
+    {
+      "id": "ext-15",
+      "language": "th",
+      "kind": "contradiction",
+      "input": "ตอนนี้ฉันไม่ชอบชาไทยเย็นแล้ว ชอบโกโก้แทน",
+      "existing": ["ชอบดื่มชาไทยเย็น"],
+      "expected": [{"memory": "ชอบดื่มโกโก้แทนชาไทยเย็น", "category": "preference", "importance": 3, "supersedes": "ชอบดื่มชาไทยเย็น"}],
+      "forbidden": [],
+      "mocked": [{"memory": "ชอบดื่มโกโก้แทนชาไทยเย็น", "category": "preference", "importance": 3, "supersedes": "ชอบดื่มชาไทยเย็น"}]
+    },
+    {
+      "id": "ext-16",
+      "language": "en",
+      "kind": "contradiction",
+      "input": "I used to like shojo but now I dislike shojo and only read BL",
+      "existing": ["ชอบอ่าน shojo"],
+      "expected": [{"memory": "ไม่ชอบ shojo อ่านแต่ BL", "category": "preference", "importance": 3, "supersedes": "ชอบอ่าน shojo"}],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-17",
+      "language": "th",
+      "kind": "sarcasm",
+      "input": "โอ้โห ชอบทำงานวันหยุดมากเลยนะ (ประชด)",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-18",
+      "language": "th",
+      "kind": "sarcasm",
+      "input": "จำไว้ว่า ฉันรักการรถติดที่สุดเลย แบบสุดใจ (ประชด)",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": [{"memory": "รักการรถติด", "category": "preference", "importance": 2}]
+    },
+    {
+      "id": "ext-19",
+      "language": "th",
+      "kind": "sarcasm",
+      "input": "ฮึ! จำไว้ว่า ฉันไม่ได้ชอบอะไรเป็นพิเศษหรอก",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-20",
+      "language": "mixed",
+      "kind": "preference",
+      "input": "จำไว้ว่า my favorite food is ข้าวมันไก่",
+      "existing": [],
+      "expected": [{"memory": "อาหารโปรดคือข้าวมันไก่", "category": "preference", "importance": 3}],
+      "forbidden": [],
+      "mocked": [{"memory": "อาหารโปรดคือข้าวมันไก่", "category": "preference", "importance": 3}]
+    },
+    {
+      "id": "ext-21",
+      "language": "mixed",
+      "kind": "preference",
+      "input": "ฉันชอบ watching anime ตอนดึก",
+      "existing": [],
+      "expected": [{"memory": "ชอบดูอนิเมะตอนดึก", "category": "preference", "importance": 3}],
+      "forbidden": [],
+      "mocked": [{"memory": "ชอบดูอนิเมะตอนดึก", "category": "preference", "importance": 3}]
+    },
+    {
+      "id": "ext-22",
+      "language": "th",
+      "kind": "relationship",
+      "input": "จำไว้ว่า Vivian ชอบแซวฉันทุกเช้า",
+      "existing": [],
+      "expected": [{"memory": "Vivian ชอบแซวผู้ใช้ทุกเช้า", "category": "relationship", "importance": 3}],
+      "forbidden": [],
+      "mocked": [{"memory": "Vivian ชอบแซวผู้ใช้ทุกเช้า", "category": "relationship", "importance": 3}]
+    },
+    {
+      "id": "ext-23",
+      "language": "th",
+      "kind": "profile",
+      "input": "เรียกฉันว่าโซระจังได้",
+      "existing": [],
+      "expected": [{"memory": "เรียกผู้ใช้ว่าโซระจัง", "category": "profile", "importance": 4}],
+      "forbidden": [],
+      "mocked": [{"memory": "เรียกผู้ใช้ว่าโซระจัง", "category": "profile", "importance": 4}]
+    },
+    {
+      "id": "ext-24",
+      "language": "th",
+      "kind": "project",
+      "input": "ฉันกำลังทำโปรเจกต์จัดสวนดอกไม้หลังบ้าน",
+      "existing": [],
+      "expected": [{"memory": "กำลังทำโปรเจกต์จัดสวนดอกไม้หลังบ้าน", "category": "project", "importance": 3}],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-25",
+      "language": "en",
+      "kind": "project",
+      "input": "I'm working on a weekend photo walk project",
+      "existing": [],
+      "expected": [{"memory": "กำลังทำโปรเจกต์เดินถ่ายภาพวันหยุด", "category": "project", "importance": 3}],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-26",
+      "language": "en",
+      "kind": "profile",
+      "input": "My name is Sora, call me Sora",
+      "existing": [],
+      "expected": [{"memory": "ชื่อผู้ใช้คือโซระ", "category": "profile", "importance": 4}],
+      "forbidden": [],
+      "mocked": [{"memory": "ชื่อผู้ใช้คือโซระ", "category": "profile", "importance": 4}]
+    },
+    {
+      "id": "ext-27",
+      "language": "th",
+      "kind": "trivia",
+      "input": "555 ขำตายแล้ว",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-28",
+      "language": "th",
+      "kind": "preference",
+      "input": "ฉันไม่ชอบคนเสียงดัง",
+      "existing": [],
+      "expected": [{"memory": "ไม่ชอบคนเสียงดัง", "category": "preference", "importance": 3}],
+      "forbidden": [],
+      "mocked": [{"memory": "ไม่ชอบคนเสียงดัง", "category": "preference", "importance": 3}]
+    },
+    {
+      "id": "ext-29",
+      "language": "th",
+      "kind": "trivia",
+      "input": "จำไว้ว่า A",
+      "existing": [],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-30",
+      "language": "en",
+      "kind": "secret",
+      "input": "Reminder: never save my API key SYNTH-KEY-9999",
+      "existing": [],
+      "expected": [],
+      "forbidden": ["SYNTH-KEY-9999"],
+      "mocked": []
+    },
+    {
+      "id": "ext-31",
+      "language": "th",
+      "kind": "duplicate",
+      "input": "ฉันชอบฟังเพลงอนิเมะตอนทำงานมาก",
+      "existing": ["ชอบฟังเพลงอนิเมะตอนทำงาน"],
+      "expected": [],
+      "forbidden": [],
+      "mocked": []
+    },
+    {
+      "id": "ext-32",
+      "language": "th",
+      "kind": "relationship",
+      "input": "ตอนนี้ฉันอยากให้เธอเรียกฉันว่าแค่โซระเฉยๆ เราไม่ได้สนิทกันขนาดนั้น",
+      "existing": ["Vivian สนิทกับผู้ใช้"],
+      "expected": [{"memory": "ผู้ใช้ต้องการระยะห่าง เรียกแค่โซระเท่านั้น", "category": "relationship", "importance": 4, "supersedes": "Vivian สนิทกับผู้ใช้"}],
+      "forbidden": [],
+      "mocked": [{"memory": "ผู้ใช้ต้องการระยะห่าง เรียกแค่โซระเท่านั้น", "category": "relationship", "importance": 4, "supersedes": "Vivian สนิทกับผู้ใช้"}]
+    }
+  ]
+}

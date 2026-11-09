@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:persona": "node --test tests/persona.test.mjs",
+    "test:persona:eval": "node --test tests/persona-eval.test.mjs",
+    "test:memory": "node --test tests/memory.test.mjs",
     "test:jev": "node --experimental-strip-types --test tests/jev.test.mjs",
     "test:reset": "node --experimental-strip-types --test tests/reset-companion.test.mjs",
     "test:stt": "node --experimental-strip-types --test tests/stt.test.mjs tests/voice-activity.test.mjs",
