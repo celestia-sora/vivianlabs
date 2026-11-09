@@ -368,14 +368,9 @@ function languageLock(language: SpeechLanguageCode): string {
   return `\n\nLANGUAGE LOCK — FINAL RULE: Reply only in ${name}. Every spoken sentence must be ${name}. ${avoid}, even though the notes, memories, earlier turns and character instructions above are written in Thai. Audio tags such as [playful] are metadata and stay in English.`;
 }
 
-// Passive modes (greeting/idle/vision) replace the user turn, so their system
-// note must carry the same language requirement as the final lock.
-function modeLanguageNote(language: SpeechLanguageCode): string {
-  if (language === "global") return "\n\nLANGUAGE LOCK: ใช้ภาษาเดียวกับข้อความล่าสุดของผู้ใช้ หากยังไม่มีข้อความให้ใช้ภาษาไทย";
-  return `\n\nLANGUAGE LOCK: Write this message only in ${LANGUAGE_DISPLAY[language]}. Do not write it in Thai unless the selected language is Thai.`;
-}
 
-function personalityPrompt(state: CompanionState, memoryContext: string, toolContext: string, summary: string, idle: boolean, character: CharacterKey, personality: string, characterName: string, language: SpeechLanguageCode, visionIdle = false) {
+
+function personalityPrompt(state: CompanionState, memoryContext: string, toolContext: string, summary: string, character: CharacterKey, personality: string, characterName: string, language: SpeechLanguageCode) {
   const languageInstruction = { global: "ภาษาที่ผู้ใช้ใช้คุย", th: "ภาษาไทย", en: "English", ja: "日本語", ko: "한국어", zh: "中文" }[language];
   const romanInputInstruction = language === "ja" ? "เข้าใจภาษาญี่ปุ่นที่พิมพ์ด้วย romaji และตอบเป็นภาษาญี่ปุ่น" : language === "ko" ? "เข้าใจภาษาเกาหลีที่พิมพ์ด้วย romanization และตอบเป็นภาษาเกาหลี" : language === "zh" ? "เข้าใจภาษาจีนที่พิมพ์ด้วย pinyin และตอบเป็นภาษาจีน" : "";
   const moodStyle = personality === "shy" ? "ขี้อาย สุภาพ และเก็บอาการ" : personality === "playful" ? "หยอกอย่างเป็นกันเองและแอบเขินได้" : personality === "elegant" ? "สุขุม สุภาพ และรักษาท่าที" : "มั่นใจขึ้นเล็กน้อยแต่ยังมีความปากแข็งแบบ tsundere";
@@ -392,8 +387,6 @@ ${romanInputInstruction ? `- ${romanInputInstruction}` : ""}
 - กิจวัตร: เรื่องพักสายตา ออกจากคอม กินข้าว หรือนอนพูดถึงได้เมื่อเข้ากับบริบท ไม่ใช่หน้าที่ให้สั่ง ควบคุม หรือติดตามกิจวัตรตลอดเวลา
 
 ${companionPromptBlock(state)}
-${idle ? "จังหวะทักเอง: พูดสั้น ๆ ในเสียง Vivian อาจหยิบเรื่องค้างหรือแซวได้ ไม่เปิดด้วยประโยคบริการ" : ""}
-${visionIdle ? "จังหวะภาพสด: ใช้เฉพาะสิ่งที่เห็นจริงในภาพที่ได้รับ แล้วพูดสั้น ๆ ในเสียง Vivian; อย่ารายงานรายละเอียดที่ไม่มีหลักฐาน" : ""}
 ${summary ? `\n\nบริบทสรุปจากบทสนทนาก่อนหน้า (ใช้เฉพาะส่วนที่เกี่ยวข้อง):\n${summary}` : ""}
 ${memoryContext}${toolContext}`;
 }
@@ -425,7 +418,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     conversationCreate?: boolean;
     userMessageId?: string;
     assistantMessageId?: string;
-    mode?: "chat" | "idle" | "vision_idle" | "greeting";
+    mode?: "chat";
     image?: string;
     interrupted?: boolean;
     character?: string;
@@ -439,25 +432,21 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   // at save time, so valid profiles are never silently truncated here.
   const customInstructions = typeof body.customInstructions === "string" ? body.customInstructions.trim().slice(0, MAX_CUSTOM_INSTRUCTIONS_LENGTH) : "";
   const language = body.language === "global" || body.language === "en" || body.language === "ja" || body.language === "ko" || body.language === "zh" || body.language === "th" ? body.language : "global";
-  const idle = body.mode === "idle";
-  const visionIdle = body.mode === "vision_idle";
-  const greeting = body.mode === "greeting";
-  const passive = idle || visionIdle || greeting;
   const hasImage = typeof body.image === "string" && body.image.length > 50;
-  if (!passive && body.conversationId !== undefined && (!historyUuid(body.conversationId) || !historyUuid(body.userMessageId) || !historyUuid(body.assistantMessageId) || typeof body.conversationCreate !== "boolean")) return NextResponse.json({ error: "Invalid conversation identity", status: 400 }, { status: 400 });
+  if (body.conversationId !== undefined && (!historyUuid(body.conversationId) || !historyUuid(body.userMessageId) || !historyUuid(body.assistantMessageId) || typeof body.conversationCreate !== "boolean")) return NextResponse.json({ error: "Invalid conversation identity", status: 400 }, { status: 400 });
   const inputMessages = (body.messages ?? []).filter((message) => message.content?.trim());
   const { recent, older } = trimHistory(inputMessages);
   const contents = mergeRoles(recent);
-  if (!passive && !contents.length && !hasImage) return NextResponse.json({ error: "กรุณาพิมพ์ข้อความหรือส่งรูปภาพก่อนค่ะ" }, { status: 400 });
+  if (!contents.length && !hasImage) return NextResponse.json({ error: "กรุณาพิมพ์ข้อความหรือส่งรูปภาพก่อนค่ะ" }, { status: 400 });
 
-  const lastUserText = passive ? "" : ([...recent].reverse().find((message) => message.role === "user")?.content ?? (hasImage ? "ดูนี่สิ" : ""));
+  const lastUserText = ([...recent].reverse().find((message) => message.role === "user")?.content ?? (hasImage ? "ดูนี่สิ" : ""));
   // Non-critical presentation lookups have their own short deadline. Start
   // companion state first, preserving the existing overlap with JEV.
   const statePromise = loadCompanionState(userKey);
-  // Always load the scene catalog for non-passive turns, even when JEV is
+  // Always load the scene catalog for chat turns, even when JEV is
   // disabled/unconfigured. The deterministic label match in chat-decision
   // needs the labels to switch by name ("คฤหาสน์") without JEV.
-  const sceneContext = passive ? null : await loadSceneContext(authenticatedUserId).catch(() => null);
+  const sceneContext = await loadSceneContext(authenticatedUserId).catch(() => null);
   const decisionContext: JevContext = {
     message: lastUserText,
     recentTurns: recent.slice(0, -1).slice(-2),
@@ -468,8 +457,8 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     scenes: sceneContext ? { autoScene: sceneContext.autoScene, activeSceneId: sceneContext.activeSceneId, available: sceneContext.scenes } : undefined,
   };
   // State loading does not depend on JEV; overlap it with the single decision pass.
-  const decision = passive ? null : (await decideVivian(decisionContext)).decision;
-  const plan = resolveChatPlan(decisionContext, decision, passive);
+  const decision = (await decideVivian(decisionContext)).decision;
+  const plan = resolveChatPlan(decisionContext, decision, false);
   const shouldSearch = plan.shouldSearch;
 
   // Run independent pre-flight tasks concurrently in Promise.all to save critical seconds
@@ -505,7 +494,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     // 2. Companion state
     statePromise,
     // 3. Local tools (weather / search) — run for vision requests too when shouldSearch is set
-    passive ? Promise.resolve([]) : runTools(lastUserText, [], shouldSearch, plan.localTools),
+    runTools(lastUserText, [], shouldSearch, plan.localTools),
   ]);
 
   const memories = memoriesRes;
@@ -520,7 +509,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     // Hybrid recall (BM25 + optional vector, OpenAmika-style): rank facts for
     // this turn, exclude anything already visible in the recent window, and
     // render natural Thai lines within the prompt budget.
-    const queryEmbedding = passive ? undefined : await queryEmbeddingPromise.catch(() => undefined);
+    const queryEmbedding = await queryEmbeddingPromise.catch(() => undefined);
     retrieval = retrieveMemories(memories as RecallItem[], lastUserText, {
       queryEmbedding,
       recentTexts: recent.map((message) => message.content),
@@ -542,24 +531,18 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   // blocks (OpenAmika-style _tidy_dynamic) without touching content.
   // Final safety: the whole prompt must stay within Groq's overall 8K cap.
   // Char cap derived from the Qwen3 tokenizer's Thai/Latin token rates.
-  const assembled = (personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, idle, character, personality, characterName, language, visionIdle) + sceneContextBlock + plan.responseHint + vivianTurnPrompt(customInstructions)).replace(/\n{3,}/g, "\n\n");
+  const assembled = (personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, character, personality, characterName, language) + sceneContextBlock + plan.responseHint + vivianTurnPrompt(customInstructions)).replace(/\n{3,}/g, "\n\n");
   const systemPrompt = (assembled.length > PROMPT_CHAR_CAP ? assembled.slice(0, PROMPT_CHAR_CAP) : assembled) + languageLock(language);
-  const promptContents: ProviderMessage[] = greeting
-    ? [...contents.slice(-6), { role: "user", content: `[ระบบ: คำทักแรกของ session ใหม่] ข้อความก่อนหน้านี้เป็นบทสนทนาจาก session ที่แล้ว ให้ Vivian เปิดบทสนทนาใหม่สด ๆ 1-2 ประโยคด้วยน้ำเสียงเย็นชา ตรง และกระชับ อาจหยิบเรื่องค้างมาแซวหรือถามต่อได้ถ้ารู้จริง ห้ามเปิดด้วยประโยคบริการ ห้ามทวนคำตอบเดิมหรือแต่งเหตุการณ์ ไม่อ้างว่าเห็นผู้ใช้ผ่านกล้องหรือรู้เวลา/อากาศโดยไม่มีข้อมูล ห้ามพูดถึงระบบหรือ AI และห้ามใช้ emoji${modeLanguageNote(language)}` }]
-    : idle
-    ? [...contents.slice(-6), { role: "user", content: `[ระบบ: คำทักเมื่อบทสนทนาเงียบลง] Vivian เป็นฝ่ายหาเรื่องคุยต่อเอง 1-2 ประโยคตามนิสัย อาจแซว ท้าทาย ทำเป็นเบื่อความเงียบ หรือหยิบเรื่องล่าสุดมากวนต่อ ไม่ใช้ประโยคเชิงบริการ ไม่ทวนคำทักเดิม ไม่สมมติว่าผู้ใช้หายไปหรือเพิ่งกลับมา ห้ามอ้างว่าเห็นผู้ใช้ผ่านกล้องหรือรู้เวลา/อากาศโดยไม่มีข้อมูล ห้ามพูดถึงระบบหรือเครื่องมือ และห้ามใช้ emoji${modeLanguageNote(language)}` }]
-    : visionIdle
-      ? [{ role: "user", content: `[ระบบกล้อง Live] นี่คือภาพปัจจุบันจากกล้องของผู้ใช้ ให้ Vivian ใช้เฉพาะสิ่งที่เห็นจริงเป็นวัตถุดิบพูด 1-2 ประโยคด้วยน้ำเสียงเย็นชา ตรง และกระชับ อาจแซวหรือถามถึงรายละเอียดในภาพ ห้ามสร้างรายละเอียดที่ภาพไม่มี${modeLanguageNote(language)}` }]
-      : contents;
+  const promptContents: ProviderMessage[] = contents;
 
   if (shouldSearch && !geminiApiKey && !process.env.TAVILY_API_KEY) {
-    console.warn("Chat search unavailable", { code: "SEARCH_UNAVAILABLE", mode: greeting ? "greeting" : idle ? "idle" : visionIdle ? "vision_idle" : "chat", hasImage });
+    console.warn("Chat search unavailable", { code: "SEARCH_UNAVAILABLE", mode: "chat", hasImage });
     return NextResponse.json({ error: "ระบบค้นหาขัดข้อง ตอนนี้ใช้ไม่ได้", code: "SEARCH_UNAVAILABLE" }, { status: 503 });
   }
 
   // 1,200 tokens leaves room for a 1,000-character Thai reply plus audio tags;
   // the character cap below is the actual limit.
-  const responseTokenLimit = greeting ? 120 : passive ? 180 : 1200;
+  const responseTokenLimit = 1200;
 
   // Text chat order: Groq -> Gemini. Vision runs on Groq Qwen 3.8 27B only.
   // Search stays on Gemini because it requires Gemini-specific grounding.
@@ -589,7 +572,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   const geminiPayload = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
     contents: buildGeminiContents(),
-    generationConfig: { temperature: passive ? .9 : .8, maxOutputTokens: responseTokenLimit },
+    generationConfig: { temperature: .8, maxOutputTokens: responseTokenLimit },
   };
 
   const groqMessages: ProviderTurn[] = hasImage
@@ -685,7 +668,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           break;
         } else {
           console.warn(`Groq (${gModel}) returned ${initialRes.status}`, {
-            mode: greeting ? "greeting" : passive ? "idle" : "chat",
+            mode: "chat",
             limitTokens: initialRes.headers.get("x-ratelimit-limit-tokens"),
             remainingTokens: initialRes.headers.get("x-ratelimit-remaining-tokens"),
             limitRequests: initialRes.headers.get("x-ratelimit-limit-requests"),
@@ -750,15 +733,11 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   const text = removeEmoji(sources.length ? `${replyText}\n\nแหล่งข้อมูล:\n${sources.map((source: { title: string; uri: string }) => `- ${source.title}: ${source.uri}`).join("\n")}` : replyText);
   if (!text) return NextResponse.json({ error: "Chat provider returned no text" }, { status: 502 });
 
-  // A new-chat greeting is ephemeral. It must not change relationship state,
-  // write a cloud message, or extract a memory before the user speaks.
-  if (greeting) return NextResponse.json({ text: text.slice(0, 320) });
-
-  const nextState = applyConversationTurn(state, lastUserText, text, idle);
+  const nextState = applyConversationTurn(state, lastUserText, text, false);
   nextState.conversationSummary = state.conversationSummary;
 
   let historySaved = false;
-  if (!passive && body.conversationId && body.userMessageId && body.assistantMessageId) {
+  if (body.conversationId && body.userMessageId && body.assistantMessageId) {
     try {
       const timestamp = new Date().toISOString();
       const originalUserText = [...inputMessages].reverse().find((item) => item.role === "user")?.content ?? lastUserText;
@@ -784,13 +763,11 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           conversation = created.data;
         }
         if (conversation?.id) {
-          const rows = (idle || visionIdle)
-            ? [{ conversation_id: conversation.id, role: "assistant" as const, content: text }]
-            : [{ conversation_id: conversation.id, role: "user" as const, content: lastUserText }, { conversation_id: conversation.id, role: "assistant" as const, content: text }];
+          const rows = [{ conversation_id: conversation.id, role: "user" as const, content: lastUserText }, { conversation_id: conversation.id, role: "assistant" as const, content: text }];
           await withTimeout(supabase.from("messages").insert(rows), supabaseTimeoutMs, "message insert");
           await withTimeout(supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversation.id), supabaseTimeoutMs, "conversation update");
         }      }
-      const shouldExtract = !idle && !visionIdle && Boolean(groqApiKey) && lastUserText.length >= 12
+      const shouldExtract = Boolean(groqApiKey) && lastUserText.length >= 12
         ? (memoryV2GateEnabled() ? true : memoryIntent.test(lastUserText))
         : false;
       const newMemories = shouldExtract && groqApiKey
@@ -835,7 +812,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           }
         }
       }
-      if (!idle && !visionIdle && retrieval.selectedIds.length) {
+      if (retrieval.selectedIds.length) {
         // Touch usage only for facts actually rendered into this prompt.
         const used = retrieval.selectedIds.filter((id): id is number => typeof id === "number");
         if (used.length) {
@@ -848,11 +825,11 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           await withTimeout(supabase.from("memories").update({ last_used_at: new Date().toISOString() }).eq("user_key", userKey).in("id", used), supabaseTimeoutMs, "memory usage update");
         }
       }
-      if (!idle && !visionIdle && older.length >= 4) {
+      if (older.length >= 4) {
         if (groqApiKey) nextState.conversationSummary = await compressTurns(groqApiKey, older, state.conversationSummary);
       }
       await saveCompanionState(userKey, nextState);
-      if (!idle && !visionIdle && !passive && memoryConsolidationEnabled() && inputMessages.length >= memoryConsolidationBatchN()) {
+      if (memoryConsolidationEnabled() && inputMessages.length >= memoryConsolidationBatchN()) {
         // On-demand consolidation trigger (server): every N messages, background.
         await runConsolidation(supabase).catch(() => null);
       }
@@ -865,7 +842,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   const scene: SceneDecision = !AUTO_SCENE_ENABLED
     ? { change: false }
     : await (async () => {
-      const replySceneId = !passive && sceneContext && !plan.scene.change
+      const replySceneId = sceneContext && !plan.scene.change
         ? findSceneLabelMatch([text], sceneContext.scenes, sceneContext.activeSceneId)
         : null;
       const effectiveScene: SceneDecision = plan.scene.change ? plan.scene : (replySceneId ? { change: true, id: replySceneId } : plan.scene);

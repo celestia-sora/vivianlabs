@@ -110,16 +110,6 @@ test("response guidance is static, confidence-gated, and preserves Vivian's pers
   assert.equal(decision.intent.confidence, 0.97);
 });
 
-test("passive greetings/idle preserve memory and disable tools and probabilistic hints", () => {
-  const result = plan(context("search", { hasImage: true }), Object.fromEntries(keys.map((key) => [key, 1])), true);
-  assert.equal(result.shouldSearch, false);
-  assert.equal(result.retrieveMemory, true);
-  assert.equal(result.prepareIntegrations, false);
-  assert.equal(result.localTools.length, 0);
-  assert.equal(result.responseHint, "");
-  assert.equal(result.modelRoute, "vision");
-});
-
 for (const malformed of [null, [], {}, { answers: null }, { answers: [] }, { answers: { needs_current_information: { type: "noul", noul: 1 } } }]) {
   test(`malformed or incomplete JEV output falls back: ${JSON.stringify(malformed)}`, () => assert.equal(jev.parseJevDecision(malformed), null));
 }
@@ -482,13 +472,6 @@ test("Groq 429 with full token bucket compacts context instead of replaying the 
   assert.equal(fixture.calls.some((call) => call.kind === "gemini"), false);
 });
 
-test("fresh greetings request only 120 output tokens from Groq", async () => {
-  const fixture = chatFixture();
-  assert.equal((await fixture.post("Hello", { mode: "greeting" })).status, 200);
-  assert.equal(fixture.calls.find((call) => call.kind === "groq").body.max_tokens, 120);
-  assert.equal(fixture.background.length, 0);
-});
-
 test("optional voice examples are not injected into the runtime system prompt", async () => {
   const fixture = chatFixture({ values: { needs_current_information: 0.01 } });
   assert.equal((await fixture.post("เมื่อกี้มีคนมาจีบเรา")).status, 200);
@@ -498,12 +481,7 @@ test("optional voice examples are not injected into the runtime system prompt", 
   assert.equal(dialogue.vivianDialoguePrompt("เมื่อกี้มีคนมาจีบเรา").includes("flustered"), true);
 });
 
-test("passive greeting bypasses JEV and background persistence; access denial stops all preflight", async () => {
-  const greeting = chatFixture();
-  assert.equal((await greeting.post("", { mode: "greeting", messages: [] })).status, 200);
-  assert.equal(greeting.calls.filter((call) => call.kind === "jev").length, 0);
-  assert.equal(greeting.background.length, 0);
-  assert.equal(greeting.memoryLoads.length, 1);
+test("access denial stops all preflight", async () => {
   const denied = Response.json({ code: "AUTH_REQUIRED" }, { status: 401 });
   const locked = chatFixture({ denied });
   assert.equal(await locked.post(), denied);
@@ -690,22 +668,12 @@ test("tsundere persona and latest custom instructions reach all dialogue provide
   }
 });
 
-test("a selected language is locked last and also drives passive greeting/idle modes", async () => {
+test("a selected language is locked last", async () => {
   const fixture = chatFixture();
   await fixture.post("hello", { language: "en" });
   const prompt = fixture.calls.find((call) => call.kind === "groq").body.messages[0].content;
   assert.match(prompt, /LANGUAGE LOCK — FINAL RULE: Reply only in English\./);
   assert.ok(prompt.trimEnd().endsWith("Audio tags such as [playful] are metadata and stay in English."));
-
-  const greeting = chatFixture();
-  await greeting.post("", { mode: "greeting", language: "en" });
-  const greetingTurn = greeting.calls.find((call) => call.kind === "groq").body.messages.at(-1).content;
-  assert.match(greetingTurn, /LANGUAGE LOCK: Write this message only in English\./);
-  assert.match(greeting.calls.find((call) => call.kind === "groq").body.messages[0].content, /Reply only in English/);
-
-  const globalMode = chatFixture();
-  await globalMode.post("", { mode: "greeting", language: "global" });
-  assert.match(globalMode.calls.find((call) => call.kind === "groq").body.messages.at(-1).content, /LANGUAGE LOCK: ใช้ภาษาเดียวกับข้อความล่าสุดของผู้ใช้/);
 });
 
 test("custom instructions are bounded; empty preferences still get the persistent tsundere persona", async () => {

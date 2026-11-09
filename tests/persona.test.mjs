@@ -113,7 +113,6 @@ test("per-turn route keeps the Thai voice, capability boundary, and reply cap", 
   assert.match(route, /ไม่ใช่หน้าที่ให้สั่ง ควบคุม หรือติดตามกิจวัตรตลอดเวลา/);
   assert.match(route, /limitReplyCharacters\(generatedText, replyCharacterLimit\)/);
   assert.match(route, /LANGUAGE LOCK — FINAL RULE/);
-  assert.match(route, /modeLanguageNote\(language\)/);
   assert.match(app, /saveLanguage/);
   assert.doesNotMatch(app, /localStorage\.setItem\("vivian-speech-language"/);
   assert.match(story, /โซระจัง/);

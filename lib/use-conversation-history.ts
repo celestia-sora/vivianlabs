@@ -34,10 +34,10 @@ function historyReducer(view: HistoryView, action: HistoryAction): HistoryView {
   if (action.kind === "ready") return { ...view, ready: action.value };
   return { ...view, notice: action.value };
 }
-export function useConversationHistory(initial: HistoryMessage, pendingText: string, busy: boolean) {
+export function useConversationHistory(initial: HistoryMessage | null, pendingText: string, busy: boolean) {
   const initialRef = useRef(initial);
   const cloudRestoreId = useRef<string | null>(null);
-  const [view, dispatch] = useReducer(historyReducer, { messages: [initial], conversations: [], activeConversationId: "", ready: false, notice: null });
+  const [view, dispatch] = useReducer(historyReducer, { messages: initial ? [initial] : [], conversations: [], activeConversationId: "", ready: false, notice: null });
   const { messages, conversations, activeConversationId, ready, notice } = view;
   const setMessages = useCallback((value: SetStateAction<HistoryMessage[]>) => dispatch({ kind: "messages", value, pendingText }), [pendingText]);
   const setConversations = useCallback((value: HistoryConversation[]) => dispatch({ kind: "conversations", value }), []);
@@ -106,7 +106,7 @@ export function useConversationHistory(initial: HistoryMessage, pendingText: str
       cloudRestoreId.current = null;
       if (!state.current.busy && active) {
         setActiveConversationId(active.id);
-        setMessages(active.messages.length ? active.messages : [initialRef.current]);
+        setMessages(active.messages.length ? active.messages : initialRef.current ? [initialRef.current] : []);
       }
       cache(merged);
       setNotice(null);
@@ -181,7 +181,7 @@ export function useConversationHistory(initial: HistoryMessage, pendingText: str
     setConversations(remaining);
     if (wasActive) {
       setActiveConversationId(nextId);
-      setMessages([initialRef.current]);
+      setMessages(initialRef.current ? [initialRef.current] : []);
     }
     state.current.conversations = remaining;
     try {
