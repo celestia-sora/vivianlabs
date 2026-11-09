@@ -9,6 +9,7 @@ function fixture(failDelete = null, ignoreDelete = null) {
     memories: [{ user_key: "default" }, { user_key: "other" }],
     companion_state: [{ user_key: "default", conversation_summary: "old" }, { user_key: "other" }],
     vivian_custom_instructions: [{ id: "global", instructions: "call me Sora" }],
+    memory_consolidation_runs: [{ id: "run-1", status: "done" }, { id: "run-2", status: "done" }],
   };
   const client = { from(table) {
     let deleting = false;
@@ -19,6 +20,7 @@ function fixture(failDelete = null, ignoreDelete = null) {
       delete() { deleting = true; return query; },
       eq(key, value) { predicate = row => row[key] === value; return query; },
       in(key, values) { predicate = row => values.includes(row[key]); return query; },
+      not(key, _op, value) { predicate = row => row[key] !== value; return query; },
       then(resolve, reject) {
         if (deleting && table === failDelete) return Promise.resolve({ error: new Error("simulated failure") }).then(resolve, reject);
         const selected = rows[table].filter(predicate);
@@ -41,6 +43,7 @@ test("full reset removes the requested identity's history, memory, relationship,
     assert.equal(rows[name][0].user_key, "other");
   }
   assert.equal(rows.vivian_custom_instructions.length, 0);
+  assert.equal(rows.memory_consolidation_runs.length, 0);
   await resetCompanionData(client, "default");
   assert.equal(rows.messages.length, 1);
 });
@@ -65,4 +68,14 @@ test("reset refuses an unspecified identity", async () => {
 test("an incomplete deletion cannot be reported as a successful reset", async () => {
   const { client } = fixture(null, "memories");
   await assert.rejects(resetCompanionData(client, "default"), /verified/);
+});
+
+test("phase 2: reset clears consolidation runs; custom instructions preserved only when Phase 3 lands D7 (Phase 2 keeps legacy deletion)", async () => {
+  const { client, rows } = fixture();
+  await resetCompanionData(client, "default");
+  assert.equal(rows.memory_consolidation_runs.length, 0);
+  // Phase 2 does NOT change the custom-instructions step; D7 preservation is
+  // Phase 3's change. This documents the current behavior so the Phase 3 PR
+  // must flip this assertion intentionally.
+  assert.equal(rows.vivian_custom_instructions.length, 0);
 });

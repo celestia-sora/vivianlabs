@@ -260,6 +260,11 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/scenes": scenes,
     "@/lib/chat-decision": fixturePlan,
     "@/lib/chat-stream": load("../lib/chat-stream.ts", {}, { Response, ReadableStream, TextEncoder, TextDecoder }),
+    // Phase 2 memory: real pure helpers; consolidation side-effects stubbed
+    // so chat fixtures never write. Flags default OFF in this sandbox env,
+    // keeping legacy behavior asserted below.
+    "@/lib/memory-v2": load("../lib/memory-v2.ts"),
+    "@/lib/memory-consolidation": { runConsolidation: async () => ({ ok: true, mergedDuplicates: 0, resolvedContradictions: 0, decayed: 0, expiredMoodsDropped: 0, episodesRolled: 0, staleEmbeddings: 0, capped: false }), writeMemoryItem: async () => "inserted" },
     "@/lib/chat-history": load("../lib/chat-history.ts", {}, { crypto: require("node:crypto").webcrypto }),
     "@/lib/chat-history-store": { saveHistory: async () => { calls.push({ kind: "history" }); } },
     "next/server": { ...require("next/server"), after: (callback) => background.push(callback) },

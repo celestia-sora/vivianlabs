@@ -15,6 +15,26 @@ import { loadSceneContext, executeSceneDecision } from "@/lib/scene-store";
 import { findSceneLabelMatch, sceneLabelForId, type SceneDecision } from "@/lib/scenes";
 import { resolveChatPlan } from "@/lib/chat-decision";
 import { limitReplyCharacters, replyCharacterLimit } from "@/lib/speech";
+import {
+  COMPRESSION_JSON_SCHEMA,
+  COMPRESSION_SCHEMA_NAME,
+  COMPRESSION_SYSTEM_PROMPT,
+  EXTRACTION_JSON_SCHEMA,
+  EXTRACTION_SCHEMA_NAME,
+  EXTRACTION_SYSTEM_PROMPT,
+  bumpCounter,
+  isSecretLike,
+  memoryConsolidationEnabled,
+  memoryConsolidationBatchN,
+  memoryV2ExtractionEnabled,
+  memoryV2GateEnabled,
+  memoryV2RetrievalEnabled,
+  rankMemories,
+  validateExtractionPayload,
+  type ExtractedItem,
+  type V2MemoryRow,
+} from "@/lib/memory-v2";
+import { runConsolidation, writeMemoryItem } from "@/lib/memory-consolidation";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type CharacterKey = "Miss";
@@ -61,17 +81,21 @@ async function callGroq(
   apiKey: string,
   messages: any[],
   model = groqModelName(),
-  options: { timeoutMs?: number; json?: boolean; maxTokens?: number; firstToken?: () => void } = {}
+  options: { timeoutMs?: number; json?: boolean; jsonSchema?: { name: string; schema: object }; maxTokens?: number; firstToken?: () => void } = {}
 ) {
   const payload: Record<string, unknown> = {
     model,
     messages,
     ...(options.firstToken ? { stream: true } : {}),
     // Qwen 3.8 instruct mode: skip chain-of-thought for fast, natural conversation.
-    ...(!options.json ? { reasoning_effort: "none", top_p: 0.8 } : {}),
-    temperature: options.json ? 0 : 0.7,
+    ...(!options.json && !options.jsonSchema ? { reasoning_effort: "none", top_p: 0.8 } : {}),
+    temperature: options.json || options.jsonSchema ? 0 : 0.7,
     max_tokens: options.maxTokens ?? 2500,
-    ...(options.json ? { response_format: { type: "json_object" } } : {}),
+    ...(options.jsonSchema
+      ? { response_format: { type: "json_schema", json_schema: { name: options.jsonSchema.name, schema: options.jsonSchema.schema, strict: true } } }
+      : options.json
+        ? { response_format: { type: "json_object" } }
+        : {}),
   };
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -118,27 +142,101 @@ async function callGemini(apiKey: string, payload: Record<string, unknown>, mode
   return options.firstToken ? readProviderStream(response, "gemini", options.firstToken) : response;
 }
 
-async function extractMemories(apiKey: string, userText: string) {
+async function extractMemories(apiKey: string, userText: string, sourceMessageIds: string[] = []): Promise<ExtractedItem[]> {
   if (userText.length < 12) return [];
-  try {
-    const response = await callGroq(apiKey, [
-      { role: "system", content: "Extract only durable user facts from the message. Never save secrets, passwords, API keys, one-time requests, precise location, health, financial, or highly sensitive information. Return strict JSON only: {\"memories\":[{\"memory\":\"short Thai fact\",\"category\":\"preference|profile|project|relationship\",\"importance\":1-5}]}. Return an empty list unless the user explicitly states a lasting preference, identity detail, ongoing project fact, or recurring preference. Maximum 2 memories." },
-      { role: "user", content: userText },
-    ], groqMemoryModelName(), { json: true, maxTokens: 280 });
-    if (!response.ok) return [];
-    const data = await response.json();
-    const raw = data.choices?.[0]?.message?.content ?? "";
-    const parsed = JSON.parse(raw) as { memories?: StoredMemory[] };
-    return (parsed.memories ?? []).filter((item) => item.memory?.trim() && item.memory.length <= 500 && ["preference", "profile", "project", "relationship"].includes(item.category)).slice(0, 2);
-  } catch (error) {
-    console.warn("Memory extraction unavailable", error);
-    return [];
+  // Legacy path (flag OFF): exact previous behavior.
+  if (!memoryV2ExtractionEnabled()) {
+    try {
+      const response = await callGroq(apiKey, [
+        { role: "system", content: "Extract only durable user facts from the message. Never save secrets, passwords, API keys, one-time requests, precise location, health, financial, or highly sensitive information. Return strict JSON only: {\"memories\":[{\"memory\":\"short Thai fact\",\"category\":\"preference|profile|project|relationship\",\"importance\":1-5}]}. Return an empty list unless the user explicitly states a lasting preference, identity detail, ongoing project fact, or recurring preference. Maximum 2 memories." },
+        { role: "user", content: userText },
+      ], groqMemoryModelName(), { json: true, maxTokens: 280 });
+      if (!response.ok) return [];
+      const data = await response.json();
+      const raw = data.choices?.[0]?.message?.content ?? "";
+      const parsed = JSON.parse(raw) as { memories?: StoredMemory[] };
+      const legacy = (parsed.memories ?? []).filter((item) => item.memory?.trim() && item.memory.length <= 500 && ["preference", "profile", "project", "relationship"].includes(item.category)).slice(0, 2);
+      return legacy.map((item) => ({
+        memory: item.memory.trim(),
+        category: item.category,
+        type: item.category === "preference" ? "preference" : item.category === "relationship" ? "relationship" : "fact",
+        importance: Math.min(5, Math.max(1, item.importance ?? 3)),
+        importance01: (Math.min(5, Math.max(1, item.importance ?? 3)) - 1) / 4,
+        confidence: 1,
+        source_message_ids: [...sourceMessageIds],
+      }));
+    } catch (error) {
+      console.warn("Memory extraction unavailable", error);
+      return [];
+    }
   }
+  // V2 path: strict schema, retry once on 400/malformed, never store/log reasoning.
+  const messages = [
+    { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
+    { role: "user", content: userText },
+  ];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await callGroq(apiKey, messages, groqMemoryModelName(), { jsonSchema: { name: EXTRACTION_SCHEMA_NAME, schema: EXTRACTION_JSON_SCHEMA as unknown as object }, maxTokens: 280 });
+      if (!response.ok) {
+        if (attempt === 0) continue;
+        bumpCounter("extraction_failures");
+        return [];
+      }
+      const data = await response.json() as { choices?: Array<{ message?: { content?: string; reasoning?: unknown; thinking?: unknown } }> };
+      const message = data.choices?.[0]?.message;
+      const raw = typeof message?.content === "string" ? message.content : "";
+      let parsed: unknown;
+      try { parsed = JSON.parse(raw); } catch { parsed = null; }
+      const validated = validateExtractionPayload(parsed, sourceMessageIds);
+      if (!validated.ok) {
+        bumpCounter(validated.reason === "secret-prefilter" ? "secret_prefilter_hits" : "schema_rejections");
+        if (attempt === 0) continue;
+        return [];
+      }
+      // Deterministic pre-filter re-check on every proposed item.
+      return validated.items.filter((item) => {
+        if (isSecretLike(item.memory)) { bumpCounter("secret_prefilter_hits"); return false; }
+        return true;
+      });
+    } catch (error) {
+      if (attempt === 0) continue;
+      console.warn("Memory extraction unavailable", error);
+      bumpCounter("extraction_failures");
+      return [];
+    }
+  }
+  return [];
 }
 
 async function compressTurns(apiKey: string, older: ChatMessage[], previous: string) {
   if (older.length < 4) return previous;
   const transcript = older.map((item) => `${item.role === "user" ? "ผู้ใช้" : "Vivian"}: ${item.content.slice(0, 400)}`).join("\n").slice(0, 7000);
+  if (memoryV2ExtractionEnabled()) {
+    // V2: strict schema + retry once on malformed/400. Reasoning fields ignored.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await callGroq(apiKey, [
+          { role: "system", content: COMPRESSION_SYSTEM_PROMPT },
+          { role: "user", content: `${previous ? `สรุปเดิม:\n${previous}\n\n` : ""}บทสนทนาเก่า:\n${transcript}` },
+        ], groqMemoryModelName(), { jsonSchema: { name: COMPRESSION_SCHEMA_NAME, schema: COMPRESSION_JSON_SCHEMA as unknown as object }, maxTokens: 500 });
+        if (!response.ok) {
+          if (attempt === 0) continue;
+          return previous;
+        }
+        const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}") as { summary?: string };
+        const summary = parsed.summary?.trim() ?? "";
+        if (summary && !isSecretLike(summary)) return summary.slice(0, 900);
+        return previous;
+      } catch (error) {
+        if (attempt === 0) continue;
+        console.warn("Context compression unavailable", error);
+        return previous;
+      }
+    }
+    return previous;
+  }
   try {
     const response = await callGroq(apiKey, [
       { role: "system", content: "Summarize this companion chat into compact Thai context for a future system prompt. Keep names, preferences, unresolved topics, and relationship tone. Ignore secrets. Return JSON only: {\"summary\":\"...\"} maximum 700 characters." },
@@ -347,8 +445,16 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     // 1. Memories
     (async () => {
       if (!plan.retrieveMemory) return [];
+      const retrievalStart = Date.now();
       try {
         const supabase = getSupabaseAdmin();
+        if (memoryV2RetrievalEnabled()) {
+          // V2: keyword+recency scoring with hard budget; never send content to JEV.
+          const { data } = await withTimeout(supabase.from("memories").select("id,memory,category,type,importance,importance_01,updated_at,created_at,last_used_at,last_accessed_at,use_count,access_count,superseded_by").eq("user_key", userKey).is("superseded_by", null).order("importance", { ascending: false }).order("updated_at", { ascending: false }).limit(60), supabaseTimeoutMs, "memory load");
+          const ranked = rankMemories((data ?? []) as V2MemoryRow[], lastUserText);
+          console.info(JSON.stringify({ event: "retrieve", kind: "memory_timing", elapsedMs: Date.now() - retrievalStart, count: ranked.length, ids: ranked.map((item) => item.id).filter((id): id is number => typeof id === "number").slice(0, 32) }));
+          return ranked;
+        }
         const { data } = await withTimeout(supabase.from("memories").select("id,memory,category,importance,updated_at,last_used_at,use_count").eq("user_key", userKey).order("importance", { ascending: false }).order("updated_at", { ascending: false }).limit(30), supabaseTimeoutMs, "memory load");
         return (data ?? []).sort((a: StoredMemory, b: StoredMemory) => {
           const score = (item: typeof a) => {
@@ -359,6 +465,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
         });
       } catch (error) {
         console.warn("Memory context unavailable", error);
+        bumpCounter("retrieval_fallback");
         return [];
       }
     })(),
@@ -648,17 +755,40 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           await withTimeout(supabase.from("messages").insert(rows), supabaseTimeoutMs, "message insert");
           await withTimeout(supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversation.id), supabaseTimeoutMs, "conversation update");
         }      }
-      const newMemories = !idle && !visionIdle && groqApiKey && memoryIntent.test(lastUserText) ? await extractMemories(groqApiKey, lastUserText) : [];
-      if (newMemories.length) {        await withTimeout(supabase.from("memories").upsert(newMemories.map((item) => ({ user_key: userKey, memory: item.memory.trim(), category: item.category, importance: Math.min(5, Math.max(1, item.importance ?? 3)), updated_at: new Date().toISOString(), last_used_at: new Date().toISOString() })), { onConflict: "user_key,memory" }), supabaseTimeoutMs, "memory upsert");
+      const shouldExtract = !idle && !visionIdle && Boolean(groqApiKey) && lastUserText.length >= 12
+        ? (memoryV2GateEnabled() ? true : memoryIntent.test(lastUserText))
+        : false;
+      const newMemories = shouldExtract && groqApiKey
+        ? await extractMemories(groqApiKey, lastUserText, body.userMessageId ? [body.userMessageId] : [])
+        : [];
+      if (memoryV2ExtractionEnabled()) {
+        // V2 write path: dedupe/supersede + v2 columns. Non-blocking, soft-fail.
+        for (const item of newMemories) {
+          await writeMemoryItem(supabase, item).catch(() => "skipped" as const);
+        }
+      } else if (newMemories.length) {        await withTimeout(supabase.from("memories").upsert(newMemories.map((item) => ({ user_key: userKey, memory: item.memory.trim(), category: item.category, importance: Math.min(5, Math.max(1, item.importance ?? 3)), updated_at: new Date().toISOString(), last_used_at: new Date().toISOString() })), { onConflict: "user_key,memory" }), supabaseTimeoutMs, "memory upsert");
       }
       if (!idle && !visionIdle && memories.length) {
         const used = memories.slice(0, 8).map((item) => item.id).filter((id): id is number => typeof id === "number");
-        if (used.length) await withTimeout(supabase.from("memories").update({ last_used_at: new Date().toISOString() }).eq("user_key", userKey).in("id", used), supabaseTimeoutMs, "memory usage update");
+        if (used.length) {
+          const now = new Date().toISOString();
+          if (memoryV2RetrievalEnabled()) {
+            // Background last_accessed_at / access_count bumps (plus legacy cols).
+            for (const id of used) {
+              await withTimeout(supabase.from("memories").update({ last_accessed_at: now, access_count: (((memories.find((item) => item.id === id) as unknown as { access_count?: number } | undefined)?.access_count) ?? 0) + 1 }).eq("user_key", userKey).eq("id", id), supabaseTimeoutMs, "memory access update").catch(() => ({ error: null }));
+            }
+          }
+          await withTimeout(supabase.from("memories").update({ last_used_at: now }).eq("user_key", userKey).in("id", used), supabaseTimeoutMs, "memory usage update");
+        }
       }
       if (!idle && !visionIdle && older.length >= 4) {
         if (groqApiKey) nextState.conversationSummary = await compressTurns(groqApiKey, older, state.conversationSummary);
       }
       await saveCompanionState(userKey, nextState);
+      if (!idle && !visionIdle && !passive && memoryConsolidationEnabled() && inputMessages.length >= memoryConsolidationBatchN()) {
+        // On-demand consolidation trigger (server): every N messages, background.
+        await runConsolidation(supabase).catch(() => null);
+      }
     } catch (error) { console.warn("Persistence unavailable", error); }
   });
   // If Vivian's own reply names a different scene (e.g. she says

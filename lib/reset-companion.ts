@@ -15,12 +15,20 @@ export async function resetCompanionData(supabase: SupabaseClient, userKey: stri
     const result = await supabase.from(table).delete().eq("user_key", userKey);
     if (result.error) throw result.error;
   }
+  // Phase 2: consolidation runs are global (no user_key); clearing them is part
+  // of "reset clears every new table" (plan §4.8). Added without touching the
+  // custom-instructions step below — D7 preservation is owned by Phase 3.
+  const runs = await supabase.from("memory_consolidation_runs").delete().not("id", "is", null);
+  if (runs.error) throw runs.error;
   // Custom instructions are one shared singleton, not identity-scoped.
+  // NOTE: D7 (Phase 3) proposes preserving this row on Reset; that change is
+  // made by the Phase 3 agent. Phase 2 keeps current behavior exactly here.
   const instructions = await supabase.from("vivian_custom_instructions").delete().eq("id", "global");
   if (instructions.error) throw instructions.error;
   const checks = await Promise.all(["conversations", "memories", "companion_state"].map(table =>
     supabase.from(table).select("*", { count: "exact", head: true }).eq("user_key", userKey)));
   checks.push(await supabase.from("vivian_custom_instructions").select("*", { count: "exact", head: true }).eq("id", "global"));
+  checks.push(await supabase.from("memory_consolidation_runs").select("*", { count: "exact", head: true }));
   if (ids.length) checks.push(await supabase.from("messages").select("*", { count: "exact", head: true }).in("conversation_id", ids));
   for (const check of checks) {
     if (check.error) throw check.error;
