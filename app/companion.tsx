@@ -93,38 +93,6 @@ const ORB_DIRECTIONS: Array<{ key: OrbDirection; icon: IconName; label: string }
   { key: "type", icon: "message", label: "chat" },
   { key: "settings", icon: "config", label: "setting" },
 ];
-const greetings: Record<SpeechLanguage, string[]> = {
-  global: [
-    "[softly] มาแล้ว. วันนี้ไปไหนมา เล่าให้ฉันฟังหน่อย",
-    "[playful] กลับมาหาฉันแล้วสินะ. คราวนี้ห้ามหายไปนานแบบนั้นอีก",
-  ],
-  th: [
-    "[softly] มาแล้ว. วันนี้ไปไหนมา เล่าให้ฉันฟังหน่อย",
-    "[curious] อ้อ มาแล้วเหรอ. มีอะไรเกิดขึ้นบ้าง ฉันอยากรู้",
-    "[playful] กลับมาหาฉันแล้วสินะ. คราวนี้ห้ามหายไปนานแบบนั้นอีก",
-  ],
-  en: [
-    "[softly] You're here. Where were you today? Tell me.",
-    "[playful] Back with me. Don't disappear for that long again.",
-  ],
-  ja: [
-    "[softly] 来たんだ。今日はどこに行ってたの。話して。",
-    "[playful] 戻ってきたね。あんなに長くいなくならないで。",
-  ],
-  ko: [
-    "[softly] 왔구나. 오늘은 어디 갔다 온 거야. 말해 줘.",
-    "[playful] 돌아왔네. 그렇게 오래 사라지지 마.",
-  ],
-  zh: [
-    "[softly] 你来了。今天去了哪里，跟我说。",
-    "[playful] 回来了。下次别消失那么久。",
-  ],
-};
-const greeting = (language: SpeechLanguage = "th"): Message => {
-  const lines = greetings[language] ?? greetings.th;
-  return historyMessage("vivian", lines[Math.floor(Math.random() * lines.length)]);
-};
-const GREETING_PENDING = "Vivian กำลังนึกว่าจะพูดอะไร...";
 const BACKGROUNDS = { day: "/backgrounds/christmas-day-4x3.jpg", night: "/backgrounds/christmas-night-4x3.jpg" } as const;
 const PRESET_SCENE_IMAGES = Object.values(BACKGROUNDS);
 const APP_CODENAME = "None";
@@ -139,12 +107,6 @@ const PLAYBACK_START_MS = 2500;
 const AUDIO_SYNC_SETTLE_MS = 140;
 const MIN_RECORDING_MS = 550;
 const MIN_SPEECH_MS = 320;
-const IDLE_AFTER_MS = 75_000;
-const IDLE_COOLDOWN_MS = 8 * 60 * 1000;
-const LAST_IDLE_KEY = "vivian-last-idle";
-const VISION_MIN_INTERVAL_MS = 5000;
-const VISION_MAX_INTERVAL_MS = 10000;
-const VISION_COOLDOWN_MS = 6000;
 
 function abortAfter(ms: number) {
   if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
@@ -212,11 +174,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const analyserRef = useRef<AnalyserNode | null>(null);
   const lipSyncFrameRef = useRef<number | null>(null);
   const speakIdRef = useRef(0);
-  const greetingSpokenRef = useRef(false);
-  const greetingRequestRef = useRef<AbortController | null>(null);
-  const greetingGenerationRef = useRef(0);
-  const greetingTextRef = useRef<string | null>(null);
-  const greetingLanguageRef = useRef<SpeechLanguage | null>(null);
   const audioUnlockedByUserRef = useRef(false);
   const ttsAbortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
@@ -228,22 +185,17 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const micEnabledRef = useRef(false);
   const interactedRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
-  const idleBusyRef = useRef(false);
   const voiceIdRef = useRef("");
   const speechLanguageRef = useRef<SpeechLanguage>("th");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraActiveRef = useRef(false);
-  const lastVisionTriggerRef = useRef(0);
-  const visionTimerRef = useRef<number | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   cameraActiveRef.current = cameraActive;
-  // Keep the first server/client render identical while the greeting loads.
-  const initialGreeting = useRef<Message>({ from: "vivian", text: GREETING_PENDING });
-  const messagesRef = useRef<Message[]>([initialGreeting.current]);
+  const messagesRef = useRef<Message[]>([]);
   const companionRef = useRef<CompanionState>(defaultCompanionState());
   const [message, setMessage] = useState("");
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -266,7 +218,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const [panel, setPanel] = useState<Panel | null>(null);
   const panelRef = useRef<Panel | null>(null);
   const sidebarOpenRef = useRef(false);
-  const [greetingTrigger, setGreetingTrigger] = useState(0);
   const activeConversationRef = useRef("daily-talk");
   const [conversationSearch, setConversationSearch] = useState("");
   const [previewConversationId, setPreviewConversationId] = useState<string | null>(null);
@@ -438,12 +389,12 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   useEffect(() => { setVoiceIdInput(voiceId); }, [voiceId]);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
-  const history = useConversationHistory(initialGreeting.current, GREETING_PENDING, sending || resetting);
+  const history = useConversationHistory(null, "", sending || resetting);
   const { messages, setMessages, conversations, activeConversationId, setActiveConversationId } = history;
   const [resetConfirming, setResetConfirming] = useState(false);
   const [resetNotice, setResetNotice] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
-  const lastVivianMessage = messages.filter((item) => item.from === "vivian").at(-1)?.text ?? initialGreeting.current.text;
+  const lastVivianMessage = messages.filter((item) => item.from === "vivian").at(-1)?.text ?? "";
   messagesRef.current = messages;
   activeConversationRef.current = activeConversationId;
   sendingRef.current = sending;
@@ -936,78 +887,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }
 
   useEffect(() => {
-    if (!preferencesReady || !history.ready) return;
-    if (messagesRef.current.length !== 1 || messagesRef.current[0].text !== GREETING_PENDING) return;
-    const previousSession = conversations
-      .filter((item) => item.id !== activeConversationId && item.messages.some((entry) => entry.from === "me"))
-      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    const previousMessages = previousSession?.messages
-      .filter((item) => item.text !== GREETING_PENDING && item.text !== "[ส่งรูปภาพ]")
-      .slice(-6)
-      .map((item) => ({ role: item.from === "me" ? "user" : "assistant", content: item.text.slice(0, 500) })) ?? [];
-    const conversationId = activeConversationId;
-    const requestId = ++greetingGenerationRef.current;
-    const controller = new AbortController();
-    let timedOut = false;
-    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, CHAT_TIMEOUT_MS);
-    greetingRequestRef.current = controller;
-    greetingTextRef.current = null;
-    greetingSpokenRef.current = false;
-    greetingLanguageRef.current = speechLanguageRef.current;
-    void (async () => {
-      try {
-        const response = await authFetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({ mode: "greeting", messages: previousMessages, character: selectedModel, customInstructions: customInstructionsRef.current, language: speechLanguageRef.current }),
-        });
-        if (!response.ok) throw new Error("Greeting unavailable");
-        const data = await response.json() as { text?: string };
-        const text = data.text?.trim();
-        if (!text) throw new Error("Empty greeting");
-        if (requestId !== greetingGenerationRef.current || activeConversationRef.current !== conversationId || messagesRef.current[0]?.text !== GREETING_PENDING) return;
-        greetingTextRef.current = text;
-        setMessages((current) => current.length === 1 && current[0].from === "vivian" ? [historyMessage("vivian", text)] : [...current, historyMessage("vivian", text)]);
-        if (audioUnlockedByUserRef.current && !mutedRef.current && !greetingSpokenRef.current) {
-          greetingSpokenRef.current = true;
-          void speak(text);
-        }
-      } catch {
-        if ((timedOut || !controller.signal.aborted) && requestId === greetingGenerationRef.current && activeConversationRef.current === conversationId && messagesRef.current[0]?.text === GREETING_PENDING) {
-          const fallback = greeting(speechLanguageRef.current);
-          setMessages((current) => current.length === 1 && current[0].text === GREETING_PENDING ? [fallback] : [...current, fallback]);
-          if (audioUnlockedByUserRef.current && !mutedRef.current && !greetingSpokenRef.current) {
-            greetingSpokenRef.current = true;
-            void speak(fallback.text);
-          }
-        }
-      } finally {
-        window.clearTimeout(timeout);
-        if (greetingRequestRef.current === controller) greetingRequestRef.current = null;
-      }
-    })();
-    return () => controller.abort();
-  }, [preferencesReady, greetingTrigger, history.ready, setMessages]);
-
-  // A language change before the first user message regenerates the opening
-  // line, so the badge, the spoken greeting and the reply agree.
-  useEffect(() => {
-    if (!preferencesReady || !history.ready) return;
-    const usedLanguage = greetingLanguageRef.current;
-    if (!usedLanguage || usedLanguage === speechLanguage) return;
-    if (messagesRef.current.some((item) => item.from === "me")) return;
-    greetingGenerationRef.current += 1;
-    greetingRequestRef.current?.abort();
-    greetingRequestRef.current = null;
-    stopSpeech();
-    greetingTextRef.current = null;
-    greetingSpokenRef.current = false;
-    setMessages([{ ...initialGreeting.current }]);
-    setGreetingTrigger((value) => value + 1);
-  }, [speechLanguage, preferencesReady, history.ready, setMessages]);
-
-  useEffect(() => {
     if (!sidebarOpen) return;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { setPanel(null); setSidebarOpen(false); } };
     window.addEventListener("keydown", onKeyDown);
@@ -1035,20 +914,14 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     const unlock = () => {
       audioUnlockedByUserRef.current = true;
       void unlockAudio();
-      if (greetingTextRef.current && !greetingSpokenRef.current && !mutedRef.current) {
-        greetingSpokenRef.current = true;
-        void speak(greetingTextRef.current);
-      }
     };
     window.addEventListener("pointerdown", unlock, { once: true });
     const cancelMemory = scheduleBackgroundWork(() => { void loadMemory(); });
-    const idleTimer = window.setInterval(() => { void maybeIdleGreeting(); }, 12000);
     const onVisible = () => { lastActivityRef.current = Date.now(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelMemory();
       window.removeEventListener("pointerdown", unlock);
-      window.clearInterval(idleTimer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
@@ -1619,25 +1492,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   function markActivity() {
     lastActivityRef.current = Date.now();
   }
-  function lastIdleAt() {
-    const fromState = companionRef.current.lastIdleAt ? Date.parse(companionRef.current.lastIdleAt) : 0;
-    const fromStore = Number(window.localStorage.getItem(LAST_IDLE_KEY) ?? 0);
-    return Math.max(fromState || 0, fromStore || 0);
-  }
-  async function maybeIdleGreeting() {
-    if (resettingRef.current || idleBusyRef.current || sendingRef.current || speakingRef.current || recordingRef.current) return;
-    if (!interactedRef.current || document.hidden) return;
-    if (Date.now() - lastActivityRef.current < IDLE_AFTER_MS) return;
-    if (Date.now() - lastIdleAt() < IDLE_COOLDOWN_MS) return;
-    idleBusyRef.current = true;
-    try {
-      await sendMessage("", { idle: true });
-      window.localStorage.setItem(LAST_IDLE_KEY, String(Date.now()));
-    } finally {
-      idleBusyRef.current = false;
-      markActivity();
-    }
-  }
   function stopSpeech() {
     speakIdRef.current += 1;
     ttsAbortRef.current?.abort();
@@ -1858,25 +1712,18 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       if (ttsAbortRef.current === abort) ttsAbortRef.current = null;
     }
   }
-  async function sendMessage(overrideText?: string, options: { idle?: boolean; visionIdle?: boolean; image?: string } = {}) {
-    const idle = Boolean(options.idle);
-    const visionIdle = Boolean(options.visionIdle);
+  async function sendMessage(overrideText?: string, options: { image?: string } = {}) {
     const text = (overrideText ?? message).trim();
     let imageToSend = options.image ?? attachedImage;
-    if (cameraActiveRef.current && !idle && !visionIdle) {
+    if (cameraActiveRef.current) {
       const liveFrame = captureCurrentFrame();
       if (liveFrame) {
         imageToSend = liveFrame;
       }
     }
     if (sendingRef.current || resettingRef.current || !history.ready) return;
-    if (!idle && !visionIdle && !text && !imageToSend) return;
-    if (!idle && !visionIdle) {
-      greetingGenerationRef.current += 1;
-      greetingRequestRef.current?.abort();
-      greetingTextRef.current = null;
-    }
-    if (!idle && !visionIdle && text && await handleExpressionCommand(text)) {
+    if (!text && !imageToSend) return;
+    if (text && await handleExpressionCommand(text)) {
       setMessage("");
       setAttachedImage(null);
       markActivity();
@@ -1884,14 +1731,12 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     }
     if (speakingRef.current) stopSpeech();
     markActivity();
-    if (!idle && !visionIdle) interactedRef.current = true;
+    interactedRef.current = true;
     const displayText = text || (imageToSend ? "[ส่งรูปภาพ]" : "");
-    const nextMessages = (idle || visionIdle) ? messagesRef.current : [...messagesRef.current.filter((item) => item.text !== GREETING_PENDING), historyMessage("me", displayText)];
-    if (!idle && !visionIdle) {
-      setMessages(nextMessages);
-      setMessage("");
-      setAttachedImage(null);
-    }
+    const nextMessages = [...messagesRef.current, historyMessage("me", displayText)];
+    setMessages(nextMessages);
+    setMessage("");
+    setAttachedImage(null);
     setSending(true);
     sendingRef.current = true;
     const sceneGeneration = sceneLibrary.getGeneration();
@@ -1905,13 +1750,13 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
         headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
         signal: abortAfter(CHAT_TIMEOUT_MS),
         body: JSON.stringify({
-          mode: visionIdle ? "vision_idle" : idle ? "idle" : "chat",
+          mode: "chat",
           conversationId: requestConversationId,
           conversationCreate: !history.isCloudConversation(requestConversationId),
           conversationTitle: conversations.find((item) => item.id === requestConversationId)?.title ?? (text.slice(0, 42) || "Daily Talk"),
           userMessageId: nextMessages.filter((item) => item.from === "me").at(-1)?.id,
           assistantMessageId: replyMessageId,
-          messages: nextMessages.filter((item) => item.text !== GREETING_PENDING).map((item) => ({ role: item.from === "me" ? "user" : "assistant", content: item.text })),
+          messages: nextMessages.map((item) => ({ role: item.from === "me" ? "user" : "assistant", content: item.text })),
           image: imageToSend ?? undefined,
           character: selectedModel,
           customInstructions: customInstructionsRef.current,
@@ -1939,19 +1784,17 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       if (data.memories?.length) setMemories(data.memories.filter((item: Memory) => typeof item.id === "number"));
       setSending(false);
       sendingRef.current = false;
-      void playReaction(reply, text, idle || visionIdle);
+      void playReaction(reply, text, false);
       void loadMemory();
     } catch (error) {
       console.error("Vivian response unavailable", error);
       resetReaction();
-      if (!idle && !visionIdle) {
-        const message = error instanceof Error && error.message.includes("RATE_LIMITED") ? "หยุดส่งข้อความ รอให้ระบบพร้อมก่อน"
-          : error instanceof Error && error.message === "SEARCH_UNAVAILABLE" ? "ระบบค้นหาขัดข้อง ตอนนี้ใช้ไม่ได้"
-          : error instanceof Error && error.message === "CHAT_NOT_CONFIGURED" ? "ระบบสนทนายังไม่พร้อม"
-          : "การเชื่อมต่อขาด รอจนกว่าจะกลับมา";
-        setErrorNotice(message);
-        setMessages((current) => [...current, historyMessage("vivian", message)]);
-      }
+      const message = error instanceof Error && error.message.includes("RATE_LIMITED") ? "หยุดส่งข้อความ รอให้ระบบพร้อมก่อน"
+        : error instanceof Error && error.message === "SEARCH_UNAVAILABLE" ? "ระบบค้นหาขัดข้อง ตอนนี้ใช้ไม่ได้"
+        : error instanceof Error && error.message === "CHAT_NOT_CONFIGURED" ? "ระบบสนทนายังไม่พร้อม"
+        : "การเชื่อมต่อขาด รอจนกว่าจะกลับมา";
+      setErrorNotice(message);
+      setMessages((current) => [...current, historyMessage("vivian", message)]);
     } finally {
       cancelTiming(firstTokenTiming); cancelTiming(replyTiming);
       setSending(false);
@@ -2227,7 +2070,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       setCameraFacing(facing);
       setCameraActive(true);
       cameraActiveRef.current = true;
-      lastVisionTriggerRef.current = Date.now();
     } catch (err) {
       console.error("Camera access failed", err);
       setErrorNotice("ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตการเข้าถึงกล้องนะคะ");
@@ -2242,8 +2084,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     }
     setCameraActive(false);
     cameraActiveRef.current = false;
-    if (visionTimerRef.current) window.clearTimeout(visionTimerRef.current);
-    visionTimerRef.current = null;
   }
 
   async function toggleCamera() {
@@ -2307,45 +2147,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     e.target.value = "";
   }
 
-  useEffect(() => {
-    if (!cameraActive) {
-      if (visionTimerRef.current) window.clearTimeout(visionTimerRef.current);
-      visionTimerRef.current = null;
-      return;
-    }
-    let isMounted = true;
-    function scheduleNextCapture() {
-      const delay = Math.floor(Math.random() * (VISION_MAX_INTERVAL_MS - VISION_MIN_INTERVAL_MS + 1)) + VISION_MIN_INTERVAL_MS;
-      visionTimerRef.current = window.setTimeout(async () => {
-        if (!isMounted || !cameraActiveRef.current) return;
-        const now = Date.now();
-        const timeSinceLast = now - lastVisionTriggerRef.current;
-        if (
-          timeSinceLast >= VISION_COOLDOWN_MS &&
-          !sendingRef.current &&
-          !speakingRef.current &&
-          !recordingRef.current &&
-          !message.trim()
-        ) {
-          const frame = captureCurrentFrame();
-          if (frame) {
-            lastVisionTriggerRef.current = Date.now();
-            await sendMessage("", { visionIdle: true, image: frame });
-          }
-        }
-        if (isMounted && cameraActiveRef.current) {
-          scheduleNextCapture();
-        }
-      }, delay);
-    }
-    scheduleNextCapture();
-    return () => {
-      isMounted = false;
-      if (visionTimerRef.current) window.clearTimeout(visionTimerRef.current);
-      visionTimerRef.current = null;
-    };
-  }, [cameraActive, message]);
-
   async function saveMemory(memory: Memory) {
     const response = await authFetch("/api/memory", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: memory.id, memory: memoryDraft, category: memory.category, importance: memory.importance }) });
     if (!response.ok) return setErrorNotice("บันทึกความจำไม่สำเร็จค่ะ");
@@ -2361,9 +2162,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     memoryGenerationRef.current += 1;
     setResetting(true);
     setResetNotice(null);
-    greetingGenerationRef.current += 1;
-    greetingRequestRef.current?.abort();
-    greetingTextRef.current = null;
     stopSpeech();
     micEnabledRef.current = false;
     stopRecording();
@@ -2376,12 +2174,11 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       if (data.ok !== true) throw new Error("Reset unconfirmed");
       // D7: Reset KEEPS custom instructions (persona persists) — do not
       // remove the vivian-custom-instructions cache or cloud singleton.
-      for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak", LAST_IDLE_KEY]) window.localStorage.removeItem(key);
+      for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak"]) window.localStorage.removeItem(key);
       const id = crypto.randomUUID();
       window.localStorage.setItem("vivian-active-conversation", id);
       setActiveConversationId(id);
       history.clear();
-      initialGreeting.current = historyMessage("vivian", "...ไง เริ่มคุยกันใหม่ได้เลยนะ");
       setMessages([]);
       setMemories([]);
       setCompanion(defaultCompanionState());
@@ -2468,9 +2265,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   function selectConversation(conversation: Conversation) {
     if (sending || resettingRef.current || !history.ready) return;
     setErrorNotice(null);
-    greetingGenerationRef.current += 1;
-    greetingRequestRef.current?.abort();
-    greetingTextRef.current = null;
     setActiveConversationId(conversation.id);
     window.localStorage.setItem("vivian-active-conversation", conversation.id);
     setMessages(conversation.messages);
@@ -2480,15 +2274,10 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     if (sending || resettingRef.current || !history.ready) return;
     setPreviewConversationId(null);
     setErrorNotice(null);
-    greetingGenerationRef.current += 1;
-    greetingRequestRef.current?.abort();
-    greetingTextRef.current = null;
-    greetingSpokenRef.current = false;
     const id = crypto.randomUUID();
     setActiveConversationId(id);
     window.localStorage.setItem("vivian-active-conversation", id);
-    setMessages([{ from: "vivian", text: GREETING_PENDING }]);
-    setGreetingTrigger((value) => value + 1);
+    setMessages([]);
     closeMenu();
   }
   async function deleteConversation(id: string) {

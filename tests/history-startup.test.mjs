@@ -19,7 +19,7 @@ function fixture() {
     '@/lib/chat-history-client': { fetchHistory: () => new Promise(resolve => { finish = resolve; }), appendHistory: async () => {} },
   }, { window, AbortController, clearInterval() {}, crypto: webcrypto, queueMicrotask, localStorage: { getItem: () => null, setItem() {} } });
   const render = (busy = false) => {
-    index = 0; effects = []; const history = loaded.useConversationHistory({ from: 'vivian', text: 'pending' }, 'pending', busy);
+    index = 0; effects = []; const history = loaded.useConversationHistory(null, '', busy);
     effects[0](); return history;
   };
   let history = render(); const cleanup = effects.find(fn => fn.toString().includes('mounted.current = true'))();
@@ -28,7 +28,7 @@ function fixture() {
 const cloud = [{ id: 'cloud-thread', title: 'Cloud', updatedAt: 1, cloud: true, messages: [{ id: 'message', from: 'me', text: 'cloud text' }] }];
 test('local composer becomes ready before history fetch, then a pristine device restores its cloud thread', async () => {
   const f = fixture(); await tick(); assert.equal(f.view.ready, true);
-  let h = f.render(); h.setMessages([{ from: 'vivian', text: 'new welcome' }]); // An ephemeral greeting must not prevent restoration.
+  let h = f.render(); h.setMessages([]); // An empty composer must not prevent restoration.
   f.render(); f.release(); await tick(); f.finish(cloud); await tick();
   assert.equal(f.view.activeConversationId, 'cloud-thread'); assert.equal(f.view.messages[0].text, 'cloud text'); f.cleanup();
 });
