@@ -4,11 +4,11 @@ import { isAllowedUser, isSameOriginMutation } from "../lib/auth/policy.ts";
 
 const user = (email, extras = {}) => ({ email, email_confirmed_at: "2026-10-02T00:00:00Z", is_anonymous: false, ...extras });
 
-test("any non-anonymous account with a confirmed email can access during the hackathon", () => {
+test("only the two invited non-anonymous accounts with confirmed emails can access", () => {
   assert.equal(isAllowedUser(user("suphloeksangko@gmail.com")), true);
   assert.equal(isAllowedUser(user("duckchan690@gmail.com")), true);
   assert.equal(isAllowedUser(user(" SUPHLOEKSANGKO@GMAIL.COM ")), true);
-  assert.equal(isAllowedUser(user("contestant@example.com")), true);
+  assert.equal(isAllowedUser(user("contestant@example.com")), false);
 });
 
 test("unconfirmed, anonymous, and missing-email identities cannot access", () => {
