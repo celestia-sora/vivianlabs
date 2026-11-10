@@ -15,6 +15,11 @@ export default function LoginPage(): React.JSX.Element {
 
   useEffect(() => {
     try {
+      if (new URLSearchParams(window.location.search).get("error") === "access_denied") {
+        window.localStorage.removeItem("vivian_auth_token");
+        window.location.replace("/access-denied");
+        return;
+      }
       const hash = window.location.hash;
       const match = hash.match(/#token=([^&]+)/);
       if (match?.[1]) {

@@ -32,8 +32,12 @@ export async function authFetch(path: string, options?: RequestInit): Promise<Re
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(path, { ...options, headers });
   if (response.status === 401 || response.status === 403) {
-    const reason = response.status === 403 ? "access_denied" : "session_expired";
-    window.location.replace(`/login?error=${reason}`);
+    if (response.status === 403) {
+      clearAuthToken();
+      window.location.replace("/access-denied");
+    } else {
+      window.location.replace("/login?error=session_expired");
+    }
   }
   return response;
 }

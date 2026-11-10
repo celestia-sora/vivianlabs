@@ -40,7 +40,21 @@ export async function POST(request: Request) {
     console.warn("ElevenLabs STT rejected", { status: response.status, mimeType: file.type, size: file.size });
     return NextResponse.json({ error: "ElevenLabs STT request failed", status: response.status }, { status: response.status });
   }
-  const text = typeof data === "object" && data !== null && "text" in data && typeof data.text === "string" ? data.text : "";
-  console.info("ElevenLabs STT complete", { mimeType: file.type, size: file.size, language });
-  return NextResponse.json({ text }, { headers: { "Cache-Control": "no-store", "Server-Timing": `scribe;dur=${Date.now() - providerStarted}` } });
+  const providerDurationMs = Date.now() - providerStarted;
+  if (typeof data !== "object" || data === null || !("text" in data) || typeof data.text !== "string") {
+    console.warn("ElevenLabs STT returned an invalid response", { mimeType: file.type, size: file.size, language, providerDurationMs });
+    return NextResponse.json({ error: "ผลถอดเสียงจากผู้ให้บริการไม่ถูกต้อง ลองใหม่อีกครั้งนะคะ" }, { status: 502, headers: { "Cache-Control": "no-store" } });
+  }
+  const detectedLanguage = "language_code" in data && typeof data.language_code === "string" ? data.language_code : null;
+  const languageProbability = "language_probability" in data && typeof data.language_probability === "number" ? data.language_probability : null;
+  console.info("ElevenLabs STT complete", {
+    mimeType: file.type,
+    size: file.size,
+    language,
+    detectedLanguage,
+    languageProbability,
+    transcriptCharacters: data.text.length,
+    providerDurationMs,
+  });
+  return NextResponse.json({ text: data.text }, { headers: { "Cache-Control": "no-store", "Server-Timing": `scribe;dur=${providerDurationMs}` } });
 }
