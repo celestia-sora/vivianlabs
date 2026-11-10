@@ -5,11 +5,16 @@ export interface AuthUserLike {
   is_anonymous?: boolean;
 }
 
-// A non-anonymous account with a confirmed email can access. Anonymous
-// and unverified identities are rejected, including forged
-// user_metadata claims.
+const INVITED_EMAILS = new Set([
+  "suphloeksangko@gmail.com",
+  "duckchan690@gmail.com",
+]);
+
+// Only confirmed, non-anonymous accounts on the invitation list can access.
+// Normalize case and surrounding whitespace before checking the verified email.
 export function isAllowedUser(user: AuthUserLike | null): boolean {
-  return Boolean(user && !user.is_anonymous && user.email?.trim() && user.email_confirmed_at);
+  const email = user?.email?.trim().toLowerCase();
+  return Boolean(user && !user.is_anonymous && email && INVITED_EMAILS.has(email) && user.email_confirmed_at);
 }
 
 export function isSameOriginMutation(request: Request): boolean {

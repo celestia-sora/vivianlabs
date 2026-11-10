@@ -129,7 +129,7 @@ Apply required Supabase migrations before deploying features — especially `202
 - Live2D uses PixiJS 6 and `pixi-live2d-display/cubism4`. Keep PixiJS on version 6.
 - Load Live2D in the browser only; Cubism Core must load before the model.
 - Keep provider credentials and service-role keys on the server.
-- Require confirmed D1 accounts (verified via vivianAuth `/api/verify`) for protected app access. Confirmed means a non-anonymous user with a verified email.
+- Require a confirmed, non-anonymous D1 account whose verified email is `suphloeksangko@gmail.com` or `duckchan690@gmail.com` (verified via vivianAuth `/api/verify`) for protected app access.
 - Verify bearer tokens, never trust client-supplied identity or claims.
 - Optional services can fail without stopping text chat.
 
