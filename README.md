@@ -2,10 +2,9 @@
 
 Meet Vivian, a shy, polite tsundere AI companion with her own opinions. She can seem cool or mildly annoyed, then get flustered when you are kind to her; small moments reveal that she cares. She chats naturally, remembers things, sees shared pictures, and chooses her own responses.
 
-- **Live app:** [vivianlabs.vercel.app](https://vivianlabs.vercel.app)
-- **Alpha test:** Open through November 13, 2026.
+- **Availability:** Private application. Public access is disabled.
 - **Source code:** [github.com/celestia-sora/vivian](https://github.com/celestia-sora/vivian)
-- **Sign-in app:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) — `https://vivianauth.celestiasora.workers.dev`
+- **Sign-in app:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) — the private vivianAuth deployment endpoint
 - **Built with:** Next.js, React, TypeScript, Supabase (app data), Cloudflare Workers + D1 (sign-in), PixiJS
 
 ## Get her running ✨
@@ -32,7 +31,7 @@ Add service keys to `.env.local` to wake up the features you want. See [.env.exa
 | --- | --- |
 | Chat | `GROQ_API_KEY` (primary chat + memory); optional `GEMINI_API_KEY` for fallback and search |
 | Vision | Groq Qwen 3.8 27B vision only (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`) |
-| Sign-in | `VIVIANAUTH_URL` (default `https://vivianauth.celestiasora.workers.dev`) + `VIVIAN_INTERNAL_TOKEN` (must match vivianAuth's Cloudflare secret) |
+| Sign-in | `VIVIANAUTH_URL` (private deployment endpoint, configured outside the repository) + `VIVIAN_INTERNAL_TOKEN` (must match vivianAuth's Cloudflare secret) |
 | Cloud memory & history | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
 | Voice input | `ELEVENLABS_API_KEY` |
 | Voice output | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` |
@@ -44,7 +43,7 @@ Tiny but important: keep secret keys server-side only. Never put provider, servi
 
 ## Sign-in & privacy 🔒
 
-Sign-in is delegated to the Cloudflare Workers app [vivianAuth](https://github.com/celestia-sora/vivianAuth) (D1-backed): `https://vivianauth.celestiasora.workers.dev`. The app validates session tokens server-side via vivianAuth's `POST /api/verify` — set `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` on Vercel (same secret as on vivianAuth's Cloudflare secrets). Flow: vivianAuth redirects with `#token=<session>` → stored in `localStorage vivian_auth_token` → sent as `Authorization: Bearer` on every API call → verified server-side (8s timeout, HTTPS only). Logout revokes via vivianAuth `POST /api/logout`. Supabase stores only app data (memory, chat history, scenes, voice prefs, custom instructions) — not sign-in.
+Sign-in is delegated to the private, D1-backed Cloudflare Workers app [vivianAuth](https://github.com/celestia-sora/vivianAuth). Its deployment endpoint is intentionally not published in this README. Configure `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` through private deployment environment settings (the token must match vivianAuth's Cloudflare secret). The app validates session tokens server-side via vivianAuth's `POST /api/verify`. Flow: vivianAuth redirects with `#token=<session>` → stored in `localStorage vivian_auth_token` → sent as `Authorization: Bearer` on every API call → verified server-side (8s timeout, HTTPS only). Logout revokes via vivianAuth `POST /api/logout`. Supabase stores only app data (memory, chat history, scenes, voice prefs, custom instructions) — not sign-in.
 
 All authorized accounts share the same cloud memories, chat history, and companion relationship state. Chat history syncs through Supabase across devices, with a browser cache for unsynced messages. Imported Live2D models stay in that browser unless you choose to save them to private cloud storage.
 
