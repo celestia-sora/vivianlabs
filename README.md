@@ -83,6 +83,8 @@ Add a scene in **Scenes** with a short label and a JPG, PNG, WebP, or AVIF image
 
 Scenes need the migration `20261003032056_dynamic_scenes.sql` applied to Vivian's Supabase project. See [Dynamic scenes](docs/dynamic-scenes.md) for details.
 
+**Known issue:** AI Auto Scene is currently broken and should be treated as unavailable until fixed.
+
 Cloudflare R2 is optional. It stores private model packages and new scene images. The shared storage limit is 8 GB, with 2 GB held back as a buffer. The app's **Menu → Status** panel shows storage use. Follow the [R2 setup guide](docs/private-r2-storage.md) before enabling it. Existing Supabase scene images remain available.
 
 ## Main API routes
