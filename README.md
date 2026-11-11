@@ -4,7 +4,7 @@ Meet Vivian, a shy, polite tsundere AI companion with her own opinions. She can 
 
 - **Availability:** Private application. Public access is disabled.
 - **Source code:** [github.com/celestia-sora/vivian](https://github.com/celestia-sora/vivian)
-- **Sign-in app:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) — the private vivianAuth deployment endpoint
+- **Sign-in app:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) (private deployment; endpoint not published)
 - **Built with:** Next.js, React, TypeScript, Supabase (app data), Cloudflare Workers + D1 (sign-in), PixiJS
 
 ## Get her running ✨
