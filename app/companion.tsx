@@ -376,8 +376,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     clearCustomInstructions,
     restoreCustomInstructions,
   } = useCustomInstructions();
-  const customInstructionsRef = useRef("");
-  useEffect(() => { customInstructionsRef.current = savedCustomInstructions; }, [savedCustomInstructions]);
   const [editingMemoryId, setEditingMemoryId] = useState<number | null>(null);
   const [memoryDraft, setMemoryDraft] = useState("");
   const [backgroundMode, setBackgroundMode] = useState<keyof typeof BACKGROUNDS>("day");
@@ -1759,7 +1757,6 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
           messages: nextMessages.map((item) => ({ role: item.from === "me" ? "user" : "assistant", content: item.text })),
           image: imageToSend ?? undefined,
           character: selectedModel,
-          customInstructions: customInstructionsRef.current,
           language: speechLanguageRef.current,
         }),
       });

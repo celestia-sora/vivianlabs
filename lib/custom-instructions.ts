@@ -1,7 +1,7 @@
-// Custom instructions (persona profile, layer 2) — single shared budget.
+// Custom instructions (persona profile, layer 2) — one per verified account.
 //
-// Storage: supabase public.vivian_custom_instructions, singleton
-// id='global', service-role only. Validation: app/api/custom-instructions
+// Storage: Supabase public.vivian_user_custom_instructions,
+// service-role only. Validation: app/api/custom-instructions
 // PATCH rejects oversize with HTTP 400 (never silently truncates).
 // Prompt injection: lib/vivian-persona.ts vivianTurnPrompt(), same budget.
 // Settings UI shows a live counter against this budget.
