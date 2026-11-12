@@ -5,7 +5,6 @@ import { requireApiAccess } from "@/lib/auth/server";
 import { after, NextResponse } from "next/server";
 import { applyConversationTurn, companionPromptBlock, type CompanionState } from "@/lib/companion";
 import { vivianPersonaPrompt, vivianTurnPrompt } from "@/lib/vivian-persona";
-import { MAX_CUSTOM_INSTRUCTIONS_LENGTH } from "@/lib/custom-instructions";
 import { VIVIAN_STORY } from "@/lib/vivian-story";
 import { loadCompanionState, saveCompanionState } from "@/lib/companion-store";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
@@ -423,14 +422,11 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     interrupted?: boolean;
     character?: string;
     personality?: string;
-    characterName?: string;    customInstructions?: string;    language?: string;
+    characterName?: string;    language?: string;
   };
   const character: CharacterKey = "Miss";
   const personality = body.personality === "shy" || body.personality === "playful" || body.personality === "elegant" ? body.personality : "custom";
   const characterName = typeof body.characterName === "string" && body.characterName.trim() ? body.characterName.trim().slice(0, 40) : "Vivian";
-  // Defensive cap only: the custom-instructions API rejects >MAX with 400
-  // at save time, so valid profiles are never silently truncated here.
-  const customInstructions = typeof body.customInstructions === "string" ? body.customInstructions.trim().slice(0, MAX_CUSTOM_INSTRUCTIONS_LENGTH) : "";
   const language = body.language === "global" || body.language === "en" || body.language === "ja" || body.language === "ko" || body.language === "zh" || body.language === "th" ? body.language : "global";
   const hasImage = typeof body.image === "string" && body.image.length > 50;
   if (body.conversationId !== undefined && (!historyUuid(body.conversationId) || !historyUuid(body.userMessageId) || !historyUuid(body.assistantMessageId) || typeof body.conversationCreate !== "boolean")) return NextResponse.json({ error: "Invalid conversation identity", status: 400 }, { status: 400 });
@@ -443,6 +439,24 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   // Non-critical presentation lookups have their own short deadline. Start
   // companion state first, preserving the existing overlap with JEV.
   const statePromise = loadCompanionState(userKey);
+  // Resolve personal instructions from the verified account on the server.
+  // Never trust a client-supplied profile: switching accounts/devices must not
+  // leak one account's preferences into another account's prompt.
+  const customInstructionsPromise = (async () => {
+    if (!authenticatedUserId) return "";
+    try {
+      const { data, error } = await getSupabaseAdmin(AbortSignal.timeout(5000))
+        .from("vivian_user_custom_instructions")
+        .select("instructions")
+        .eq("user_id", authenticatedUserId)
+        .maybeSingle();
+      if (error) throw error;
+      return typeof data?.instructions === "string" ? data.instructions : "";
+    } catch (error) {
+      console.warn("Custom instructions unavailable", error);
+      return "";
+    }
+  })();
   // Always load the scene catalog for chat turns, even when JEV is
   // disabled/unconfigured. The deterministic label match in chat-decision
   // needs the labels to switch by name ("คฤหาสน์") without JEV.
@@ -467,7 +481,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   const queryEmbeddingPromise = plan.retrieveMemory && geminiApiKey && lastUserText
     ? embedQuery(lastUserText)
     : Promise.resolve(undefined as number[] | undefined);
-  const [memoriesRes, state, toolResults] = await Promise.all([
+  const [memoriesRes, state, toolResults, customInstructions] = await Promise.all([
     // 1. Memories
     (async () => {
       if (!plan.retrieveMemory) return [];
@@ -495,6 +509,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     statePromise,
     // 3. Local tools (weather / search) — run for vision requests too when shouldSearch is set
     runTools(lastUserText, [], shouldSearch, plan.localTools),
+    customInstructionsPromise,
   ]);
 
   const memories = memoriesRes;

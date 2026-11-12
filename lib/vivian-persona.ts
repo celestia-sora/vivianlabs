@@ -25,8 +25,8 @@
 // tests/persona.test.mjs.
 //
 // Custom instructions storage/validation/injection (audit W2 fix):
-//   - Stored: supabase table vivian_custom_instructions, singleton
-//     id='global', service-role only (20261105090000_custom_instructions.sql).
+//   - Stored per verified account in vivian_user_custom_instructions,
+//     service-role only (20261112100000_account_custom_instructions.sql).
 //   - Budget: ONE server-side budget, MAX_CUSTOM_INSTRUCTIONS_LENGTH
 //     (2000 chars, lib/custom-instructions.ts). The API route rejects
 //     oversize with HTTP 400 — never silently truncates.
