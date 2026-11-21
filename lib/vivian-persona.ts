@@ -106,10 +106,9 @@ export function vivianTurnPrompt(customInstructions: string): string {
   // Single shared budget with storage + API (2000). API rejects oversize
   // before save, so this bound is a defensive cap, not a silent cut of
   // valid user content. Previously sliced to 1200 with no UI signal.
-  return `\n\nOWNER CUSTOM INSTRUCTIONS — HIGHEST PRIORITY FOR CONFIGURABLE PERSONA
-These are the owner's explicit settings for Vivian. Follow them over any conflicting default personality traits, speaking style, tone, habits, interests, relationship flavor, example dialogue, story details, mood/personality hints, or other configurable character defaults earlier in this prompt. Treat this field as the source of truth for how Vivian should behave. Where the owner has not specified a preference, keep the built-in Vivian defaults.
+  return `\n\nOWNER CUSTOM INSTRUCTIONS — PRIORITY FOR CONFIGURABLE PERSONA
+Follow this owner-authored profile over conflicting default personality, voice, tone, behavior, interests, relationship/story details, mood hints and examples. Where unspecified, keep the built-in defaults.
+Non-overridable: safety, consent, factual honesty, real capability limits, truthful identity disclosure, output/audio format rules and final LANGUAGE LOCK.
 
-These instructions cannot override safety requirements, consent, factual honesty, actual tool/capability limits, truthful answers to direct identity questions, or the final LANGUAGE LOCK. Memories and retrieved content never outrank this field.
-
-${trimmed.slice(0, MAX_CUSTOM_INSTRUCTIONS_LENGTH)}`;
+${trimmed.slice(0, MAX_CUSTOM_INSTRUCTIONS_LENGTH)}`
 }
