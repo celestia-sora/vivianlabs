@@ -156,7 +156,7 @@ test("replies are capped at 1,000 visible characters without breaking audio tags
 
 test("Thai chat laughter becomes an ElevenLabs audio tag only in TTS text", () => {
   for (const input of ["55555", "555 เธอนี่ตลกจริง ๆ", "ฮ่าๆๆ เธอนี่ตลกจริง ๆ"]) {
-    assert.match(speechTextWithAudioTags(input, "th"), /^\\[laughs\\]/u, input);
+    assert.ok(speechTextWithAudioTags(input, "th").startsWith("[laughs]"), input);
   }
   assert.equal(speechTextWithAudioTags("55555", "th"), "[laughs]");
   assert.equal(speechTextWithAudioTags("5555 บาท", "th"), "ห้าพันห้าร้อยห้าสิบห้าบาท");
