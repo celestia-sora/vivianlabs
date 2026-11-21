@@ -2502,10 +2502,10 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const orbState: AIState =
     errorNotice
       ? "error"
-      : sending
-        ? "thinking"
-        : speaking
-          ? "streaming"
+      : speaking
+        ? "streaming"
+        : sending
+          ? "thinking"
           : recording
             ? "listening"
             : "idle";
@@ -2646,10 +2646,12 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       </div>
       <div className="speech-stack">
         {sttPreview && <div className="speech-preview"><small>You said</small>{sttPreview}</div>}
-        <output className={`vivian-speech ${sending ? "is-thinking" : ""}`} aria-live="polite">
-          {sending
+        <output className={`vivian-speech ${sending && !speaking ? "is-thinking" : ""}`} aria-live="polite">
+          {sending && !speaking
             ? <span className="speech-transition" key="thinking"><span>Vivian กำลังคิด</span><span className="thinking-dots" aria-hidden="true"><i/><i/><i/></span></span>
-            : <span className="speech-transition" key={lastVivianMessage}>{lastVivianMessage}</span>}
+            : !sending
+              ? <span className="speech-transition" key={lastVivianMessage}>{lastVivianMessage}</span>
+              : null}
         </output>
       </div>
       {errorNotice && <button className="error-notice" type="button" onClick={() => setErrorNotice(null)}>{errorNotice} ×</button>}
