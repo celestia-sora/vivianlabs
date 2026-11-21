@@ -90,7 +90,7 @@ test("multiple consecutive sentences emit incrementally without waiting for fini
 
 test("stage directions, audio tags only, empty inputs, and stammers are handled safely", () => {
   assert.deepEqual(feedTokens(["", "   ", "(หลบตา)"]), []);
-  assert.deepEqual(feedTokens(["[sighs]"]), []);
+  const sigh = feedTokens(["[sighs]"]);\n  assert.equal(sigh.length, 1);\n  assert.equal(sigh[0].taggedText, "[sighs]");\n  assert.equal(sigh[0].cleanText, "");
 
   const stammer = feedTokens(["[flustered] ", "B-", " B-", " Baka!"], { language: "en" });
   assert.equal(stammer.length, 1);
@@ -115,4 +115,15 @@ test("chat laughter is sent as a non-verbal ElevenLabs tag in streaming segments
   const mixed = feedTokens(["55555 เธอนี่ตลกจริง ๆ!"], { language: "th" });
   assert.equal(mixed.length, 1);
   assert.equal(mixed[0].taggedText, "[laughs] เธอนี่ตลกจริง ๆ!");
+});
+
+
+test("standalone non-verbal tags survive the streaming text buffer", () => {
+  for (const tag of ["[laughs]", "[laughing]", "[chuckles]", "[sighs]"]) {
+    const segments = feedTokens([tag], { language: "th" });
+    assert.equal(segments.length, 1, tag);
+    assert.equal(segments[0].taggedText, tag);
+    assert.equal(segments[0].cleanText, "");
+    assert.equal(segments[0].flush, true);
+  }
 });
