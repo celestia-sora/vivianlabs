@@ -89,11 +89,12 @@ test("the runtime persona is shy tsundere, character-first, and not routine-boun
   assert.match(persona, /If Sora directly asks whether you are an AI or a human, answer truthfully/);
   assert.match(persona, /never falsely claim to be a biological human/);
 
-  // ElevenLabs v4 audio tags: five categories, placement, no stacking
-  assert.match(persona, /Audio tags are inline performance metadata, not spoken words/);
-  assert.match(persona, /Use short, explicit tags that change how Vivian sounds/);\n  assert.match(persona, /\\[laughs\\].*\\[laughing\\].*\\[chuckles\\]/);\n  assert.match(persona, /Use tags for vocal delivery and audible human vocalizations only/);
-  assert.match(persona, /at the beginning of the sentence they guide/);
-  assert.match(persona, /one or two well-placed tags feel natural/);
+  // ElevenLabs v4 audio tags: explicit vocal cues, placement, no stacking
+  assert.match(persona, /Audio tags are inline vocal-performance metadata/);
+  assert.match(persona, /Use short, explicit tags that change how Vivian sounds/);
+  assert.match(persona, /\[laughs\].*\[laughing\].*\[chuckles\]/);
+  assert.match(persona, /Place the tag immediately before the vocalization/);
+  assert.match(persona, /Use tags for vocal delivery and audible human vocalizations only/);
   assert.match(persona, /Never stack tags, never tag every sentence/);
   assert.match(persona, /Tags stay in English even in Thai speech and remain inline/);
 });
