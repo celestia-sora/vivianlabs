@@ -91,7 +91,7 @@ test("the runtime persona is shy tsundere, character-first, and not routine-boun
 
   // ElevenLabs v4 audio tags: five categories, placement, no stacking
   assert.match(persona, /Audio tags are inline performance metadata, not spoken words/);
-  assert.match(persona, /draw from all five categories/);
+  assert.match(persona, /Use short, explicit tags that change how Vivian sounds/);\n  assert.match(persona, /\\[laughs\\].*\\[laughing\\].*\\[chuckles\\]/);\n  assert.match(persona, /Use tags for vocal delivery and audible human vocalizations only/);
   assert.match(persona, /at the beginning of the sentence they guide/);
   assert.match(persona, /one or two well-placed tags feel natural/);
   assert.match(persona, /Never stack tags, never tag every sentence/);
