@@ -167,7 +167,7 @@ export function speechTextWithAudioTags(value: string, language = "global"): str
   return prepareSpeechText(value, language, true);
 }
 
-const standaloneAudioEventTag = /^\\s*(?:\\[(?:laughs?|laughing|chuckles?|giggles?|sighs?|clears throat|inhales?|exhales?|gasps?|coughs?|sniffles?|crying|weeping|whimpers?)\\]\\s*)+$/iu;
+const standaloneAudioEventTag = /^\s*(?:\[(?:laughs?|laughing|chuckles?|giggles?|sighs?|clears throat|inhales?|exhales?|gasps?|coughs?|sniffles?|crying|weeping|whimpers?)\]\s*)+$/iu;
 
 /** True when the payload contains only intentional non-verbal audio events. */
 export function hasStandaloneAudioEventTag(value: string): boolean {
