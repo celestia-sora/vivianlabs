@@ -106,10 +106,18 @@ Assembly in `app/api/chat/route.ts` (system prompt, rebuilt every request):
 
 - Tags are metadata for ElevenLabs v4, never spoken/displayed words.
   `speechText()` in `lib/speech.ts` strips all `[…]` audio tags from
-  spoken text; `speechTextWithAudioTags()` preserves them inline only
-  for the TTS API input. `tests/persona.test.mjs` asserts tag leakage
-  over the whole suite (no `[...]` survives `speechText()`).
-
+  spoken text; `speechTextWithAudioTags()` preserves them inline for
+  ElevenLabs v4. The streaming buffer also preserves standalone
+  non-verbal vocalizations such as `[laughs]` and `[sighs]`; these are
+  valid audio payloads even when no spoken words follow.
+- WebSocket completion logs include `audioTagCount`, allowing Vercel
+  logs to confirm that tags reached the ElevenLabs provider.
+- Use vocal-performance tags only: emotion, delivery, and audible human
+  vocalizations. Do not use environmental sound effects or visual-only
+  stage directions as vocal tags.
+- `tests/persona.test.mjs` asserts tag guidance; `tests/speech.test.mjs`,
+  `tests/tts-text-buffer.test.mjs`, and `tests/elevenlabs-ws.test.mjs`
+  cover normalization, buffering, and provider forwarding.
 ## How to add a persona test
 
 Add a case to `tests/persona.test.mjs` asserting on (a) the core in
