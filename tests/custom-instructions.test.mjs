@@ -145,9 +145,9 @@ test("owner custom instructions outrank configurable defaults and fit the shared
   const long = "บ".repeat(2000);
   const prompt = vivianTurnPrompt(long);
   assert.ok(prompt.includes(long), "2000-char profile is fully injected, not cut at 1200");
-  assert.match(prompt, /OWNER CUSTOM INSTRUCTIONS — HIGHEST PRIORITY FOR CONFIGURABLE PERSONA/);
-  assert.match(prompt, /Follow them over any conflicting default personality traits/);
-  assert.match(prompt, /source of truth for how Vivian should behave/);
+  assert.match(prompt, /OWNER CUSTOM INSTRUCTIONS — HIGHEST PRIORITY/);
+  assert.match(prompt, /Follow this owner-authored profile over conflicting default personality/);
+  assert.match(prompt, /Where unspecified, keep the built-in defaults/);
   assert.match(prompt, /cannot override safety requirements, consent, factual honesty/);
   // Owner instructions override character defaults, but never safety/truth boundaries.
   const custom = vivianTurnPrompt("Make Vivian calm, direct, and less tsundere.");
