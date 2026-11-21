@@ -8,9 +8,10 @@ Fixture for tests: `tests/fixtures/persona/profile.sample.md`.
 
 ```
 (1) Code core — lib/vivian-persona.ts `vivianPersonaPrompt`
-    Identity, hard boundaries/safety, "not a general-purpose assistant",
-    output-format rules (emotion-tag vocabulary, language handling,
-    tag stripping). IMMUTABLE, cannot be overridden by profile or memory.
+    Identity, hard boundaries/safety, character immersion (no unsolicited
+    AI/meta self-disclosure; truthful concise disclosure when directly asked),
+    "not a general-purpose assistant", and output-format rules. IMMUTABLE,
+    cannot be overridden by profile or memory.
     Also the fallback when the profile is empty/fails/oversized.
         ↓  (never overridden by layers below)
 (2) Persona profile — custom instructions via `vivianTurnPrompt()`
