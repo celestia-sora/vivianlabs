@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAccess } from "@/lib/auth/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
-import { speechText, speechTextWithAudioTags } from "@/lib/speech";
+import { hasStandaloneAudioEventTag, speechText, speechTextWithAudioTags } from "@/lib/speech";
 import { normalizeSpeechLanguage, resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
 import { StreamingTtsSession } from "@/lib/tts-stream-session";
 
@@ -47,7 +47,7 @@ export async function POST(request: Request): Promise<Response> {
   const speechLanguage = normalizeSpeechLanguage(language);
   const cleanText = speechText(text, speechLanguage);
   const taggedText = speechTextWithAudioTags(text, speechLanguage);
-  if (!cleanText) {
+  if (!cleanText && !hasStandaloneAudioEventTag(taggedText)) {
     return NextResponse.json({ error: "Text must contain spoken words", status: 400 }, { status: 400 });
   }
   if (cleanText.length > 2000 || taggedText.length > 2000) {
