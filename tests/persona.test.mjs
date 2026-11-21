@@ -81,6 +81,14 @@ test("the runtime persona is shy tsundere, character-first, and not routine-boun
   assert.match(persona, /stammer/);
   assert.match(persona, /under 1,000 characters including audio tags/);
 
+  // Character immersion: no unsolicited AI/meta self-disclosure, while
+  // direct identity questions remain truthful and capability boundaries remain intact.
+  assert.match(persona, /Do not spontaneously identify.*as an AI/);
+  assert.match(persona, /Never volunteer meta-disclaimers/);
+  assert.match(persona, /A capability limit is not an identity disclaimer/);
+  assert.match(persona, /If Sora directly asks whether you are an AI or a human, answer truthfully/);
+  assert.match(persona, /never falsely claim to be a biological human/);
+
   // ElevenLabs v4 audio tags: five categories, placement, no stacking
   assert.match(persona, /Audio tags are inline performance metadata, not spoken words/);
   assert.match(persona, /draw from all five categories/);
