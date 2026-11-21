@@ -105,3 +105,14 @@ test("citations and >1000 visible character replies are bounded cleanly", () => 
   assert.equal(totalClean.includes("example.com"), false);
   assert.equal(totalClean.includes("แหล่งข้อมูล"), false);
 });
+
+
+test("chat laughter is sent as a non-verbal ElevenLabs tag in streaming segments", () => {
+  const segments = feedTokens(["55555"], { language: "th" });
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].taggedText, "[laughs]");
+  assert.equal(segments[0].cleanText, "ห้าหมื่นห้าพันห้าร้อยห้าสิบห้า");
+  const mixed = feedTokens(["55555 เธอนี่ตลกจริง ๆ!"], { language: "th" });
+  assert.equal(mixed.length, 1);
+  assert.equal(mixed[0].taggedText, "[laughs] เธอนี่ตลกจริง ๆ!");
+});
