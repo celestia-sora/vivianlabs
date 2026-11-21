@@ -167,6 +167,13 @@ export function speechTextWithAudioTags(value: string, language = "global"): str
   return prepareSpeechText(value, language, true);
 }
 
+const standaloneAudioEventTag = /^\\s*(?:\\[(?:laughs?|laughing|chuckles?|giggles?|sighs?|clears throat|inhales?|exhales?|gasps?|coughs?|sniffles?|crying|weeping|whimpers?)\\]\\s*)+$/iu;
+
+/** True when the payload contains only intentional non-verbal audio events. */
+export function hasStandaloneAudioEventTag(value: string): boolean {
+  return standaloneAudioEventTag.test(value);
+}
+
 // Spoken replies stay one readable, speakable message. Audio tags are delivery
 // metadata, so they never consume the visible character budget. A trimmed
 // reply prefers a whitespace boundary and never leaves a half-open tag behind.
