@@ -1,7 +1,7 @@
 import { requireApiAccess } from "@/lib/auth/server";
 import { NextResponse } from "next/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
-import { speechText, speechTextWithAudioTags } from "@/lib/speech";
+import { hasStandaloneAudioEventTag, speechText, speechTextWithAudioTags } from "@/lib/speech";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export const maxDuration = 30;
@@ -47,7 +47,7 @@ export async function POST(request: Request): Promise<Response> {
   const speechLanguage = language === "global" || language === "en" || language === "ja" || language === "ko" || language === "zh" || language === "th" ? language : "global";
   const cleanText = speechText(text, speechLanguage);
   const taggedText = speechTextWithAudioTags(text, speechLanguage);
-  if (!cleanText) return NextResponse.json({ error: "Text must contain spoken words", status: 400 }, { status: 400 });
+  if (!cleanText && !hasStandaloneAudioEventTag(taggedText)) return NextResponse.json({ error: "Text must contain spoken words or a supported non-verbal audio tag", status: 400 }, { status: 400 });
   if (cleanText.length > 2000 || taggedText.length > 2000) return NextResponse.json({ error: "Prepared speech must be under 2000 characters for ElevenLabs v4", status: 400 }, { status: 400 });
   const providerStarted = Date.now();
   let phase = "request";
