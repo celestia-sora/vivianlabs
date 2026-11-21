@@ -560,12 +560,19 @@ async function chatReply(
   const sceneContextBlock = activeSceneLabel
     ? `\n\nฉากปัจจุบันของฉากหลังคือ "${activeSceneLabel}" ให้ใช้เป็นฉากหลังตามธรรมชาติโดยไม่ต้องรายงานระบบฉาก. ไม่จำเป็นต้องพูดถึงชื่อฉากทุกครั้ง: ให้พูดถึง "ที่นี่" หรือ "ตรงนี้" เป็นหลัก และพูดชื่อฉากเฉพาะเมื่อผู้ใช้ถามถึงสถานที่ ชวนเปลี่ยนที่ หรือบริบทต้องการจริง. ห้ามย้ำชื่อฉากเดิมซ้ำติดกัน และไม่ต้องมีฉากใหม่เมื่อผู้ใช้ไม่ได้ชวนเปลี่ยน`
     : "";
-  // Tidy the assembled prompt: collapse blank runs left by optional dynamic
-  // blocks (OpenAmika-style _tidy_dynamic) without touching content.
-  // Final safety: the whole prompt must stay within Groq's overall 8K cap.
-  // Char cap derived from the Qwen3 tokenizer's Thai/Latin token rates.
-  const assembled = (personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, character, personality, characterName, language) + sceneContextBlock + plan.responseHint + vivianTurnPrompt(customInstructions)).replace(/\n{3,}/g, "\n\n");
-  const systemPrompt = (assembled.length > PROMPT_CHAR_CAP ? assembled.slice(0, PROMPT_CHAR_CAP) : assembled) + languageLock(language);
+  // Owner Custom Instructions are the highest-priority configurable persona
+  // layer. Reserve their entire validated block before trimming lower-priority
+  // context, so the prompt cap can never silently cut the owner's instructions.
+  // The immutable core is first; optional story/context is what gets trimmed.
+  const basePrompt = personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, character, personality, characterName, language);
+  const customPersonaPrompt = vivianTurnPrompt(customInstructions);
+  const contextualTail = sceneContextBlock + plan.responseHint;
+  const baseBudget = Math.max(0, PROMPT_CHAR_CAP - customPersonaPrompt.length - contextualTail.length);
+  const boundedBasePrompt = basePrompt.length > baseBudget ? basePrompt.slice(0, baseBudget) : basePrompt;
+  // Tidy blank runs without changing the priority order. LANGUAGE LOCK remains
+  // last and the complete owner-authored block is always preserved.
+  const assembled = (boundedBasePrompt + contextualTail + customPersonaPrompt).replace(/\n{3,}/g, "\n\n");
+  const systemPrompt = assembled + languageLock(language);
   const promptContents: ProviderMessage[] = contents;
 
   if (shouldSearch && !geminiApiKey && !process.env.TAVILY_API_KEY) {
