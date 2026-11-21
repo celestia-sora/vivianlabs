@@ -346,7 +346,7 @@ export class ElevenLabsDialogueTurn {
   private firstTextSent = false;
   private hasUnflushedInputs = false;
   private unacknowledgedFlushes = 0;
-  private seq = 0;
+  private seq = 0;\n  private audioTagCount = 0;
   private firstAudioAt: number | null = null;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
