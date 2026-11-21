@@ -90,7 +90,10 @@ test("multiple consecutive sentences emit incrementally without waiting for fini
 
 test("stage directions, audio tags only, empty inputs, and stammers are handled safely", () => {
   assert.deepEqual(feedTokens(["", "   ", "(หลบตา)"]), []);
-  const sigh = feedTokens(["[sighs]"]);\n  assert.equal(sigh.length, 1);\n  assert.equal(sigh[0].taggedText, "[sighs]");\n  assert.equal(sigh[0].cleanText, "");
+  const sigh = feedTokens(["[sighs]"]);
+  assert.equal(sigh.length, 1);
+  assert.equal(sigh[0].taggedText, "[sighs]");
+  assert.equal(sigh[0].cleanText, "");
 
   const stammer = feedTokens(["[flustered] ", "B-", " B-", " Baka!"], { language: "en" });
   assert.equal(stammer.length, 1);
