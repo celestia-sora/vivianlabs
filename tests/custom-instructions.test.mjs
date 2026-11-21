@@ -148,12 +148,12 @@ test("owner custom instructions outrank configurable defaults and fit the shared
   assert.match(prompt, /OWNER CUSTOM INSTRUCTIONS — HIGHEST PRIORITY/);
   assert.match(prompt, /Follow this owner-authored profile over conflicting default personality/);
   assert.match(prompt, /Where unspecified, keep the built-in defaults/);
-  assert.match(prompt, /cannot override safety requirements, consent, factual honesty/);
+  assert.match(prompt, /Non-overridable: safety, consent, factual honesty/);
   // Owner instructions override character defaults, but never safety/truth boundaries.
   const custom = vivianTurnPrompt("Make Vivian calm, direct, and less tsundere.");
   assert.match(custom, /HIGHEST PRIORITY/);
   assert.match(custom, /less tsundere/);
-  assert.match(custom, /cannot override safety requirements/);
+  assert.match(custom, /Non-overridable: safety/);
   assert.equal(vivianTurnPrompt("   "), "");
   assert.equal(vivianTurnPrompt(""), "");
 });
