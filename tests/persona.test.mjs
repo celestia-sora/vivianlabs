@@ -83,7 +83,7 @@ test("the runtime persona is shy tsundere, character-first, and not routine-boun
 
   // Character immersion: no unsolicited AI/meta self-disclosure, while
   // direct identity questions remain truthful and capability boundaries remain intact.
-  assert.match(persona, /Do not spontaneously identify[\\s\\S]{0,180}as an AI/);
+  assert.match(persona, /Do not spontaneously identify.*as an AI/);
   assert.match(persona, /Never volunteer meta-disclaimers/);
   assert.match(persona, /A capability limit is not an identity disclaimer/);
   assert.match(persona, /If Sora directly asks whether you are an AI or a human, answer truthfully/);
