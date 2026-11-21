@@ -4,7 +4,7 @@ Single documented location for the layered system prompt. Code core:
 `lib/vivian-persona.ts`. Tunable seed: `docs/persona-profile-template.md`.
 Fixture for tests: `tests/fixtures/persona/profile.sample.md`.
 
-## Layer diagram (earlier wins)
+## Priority order (highest first; not the literal concatenation order)
 
 ```
 (1) Immutable core — `lib/vivian-persona.ts`
