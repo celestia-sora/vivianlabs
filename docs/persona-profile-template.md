@@ -1,20 +1,21 @@
 # Persona profile template — paste into Settings > Custom instructions
 
-Phase 3 (decision D6): tunable persona content lives in custom instructions
-(layer 2), not in code. The code core in `lib/vivian-persona.ts` is the
-immutable fallback. This file is the seed copy of the tunable parts of the
-old `lib/vivian-persona.ts` + Thai canon, distilled to fit the single
-2000-character server-side budget (`MAX_CUSTOM_INSTRUCTIONS_LENGTH`).
+Owner Custom Instructions are the highest-priority source for configurable
+personality. Built-in Vivian defaults remain active only where this field
+does not specify a preference. Safety, truthful identity/capability limits,
+consent and output/language constraints remain non-overridable. This seed
+fits the single 2000-character server-side budget (`MAX_CUSTOM_INSTRUCTIONS_LENGTH`).
 
 How to use:
 1. Copy the text between the PERSONA_SEED markers below (a synthetic
    sanitized copy also lives at
    `tests/fixtures/persona/profile.sample.md` for CI).
-2. Paste into Settings > Custom instructions. The Settings counter shows
-   `x / 2000`. Oversize saves are rejected with HTTP 400 — never silently
-   truncated.
-3. Custom instructions cannot override the code core (identity, safety,
-   format rules). To verify behavior matches the old hardcoded persona,
+2. Paste into Settings > Vivian personality & custom instructions. The
+   Settings counter shows `x / 2000`. This single field overrides conflicting
+   default personality, voice, behavior and story details. Oversize saves
+   are rejected with HTTP 400 — never silently truncated.
+3. Safety, factual honesty, actual capability limits, consent and final
+   output/language constraints remain non-overridable. To verify behavior,
    run `npm run test:persona` with the sample fixture, then with an empty
    profile (core fallback), and compare — see `docs/persona-system.md`.
 
