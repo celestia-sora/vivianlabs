@@ -2,6 +2,7 @@ import {
   replyCharacterLimit,
   speechText,
   speechTextWithAudioTags,
+  hasStandaloneAudioEventTag,
 } from "./speech.ts";
 
 export interface TtsPhraseSegment {
@@ -180,7 +181,7 @@ export class TtsTextBuffer {
 
     const clean = speechText(remaining, this.language).trim();
     const tagged = speechTextWithAudioTags(remaining, this.language).trim();
-    if (!clean || !tagged) return segments;
+    if (!tagged || (!clean && !hasStandaloneAudioEventTag(tagged))) return segments;
 
     const index = this.segmentIndex++;
     segments.push({
