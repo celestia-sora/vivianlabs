@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fishSpeechText, limitReplyCharacters, replyCharacterLimit, speechEmotionTag, speechSpeed, speechStyle, speechText, speechTextWithAudioTags, visibleReplyLength } from "../lib/speech.ts";
+import { fishSpeechText, hasStandaloneAudioEventTag, limitReplyCharacters, replyCharacterLimit, speechEmotionTag, speechSpeed, speechStyle, speechText, speechTextWithAudioTags, visibleReplyLength } from "../lib/speech.ts";
 
 test("spoken replies omit stage directions and sources but retain dialogue and explanations", () => {
   assert.equal(speechText("(หลบตา) ไม่ได้รอหรอก... **Vivian** อ่าน [เรื่องนี้](https://example.com) (เวอร์ชัน 2)\nแหล่งข้อมูล:\n- https://example.com"), "ไม่ได้รอหรอก… Vivian อ่าน เรื่องนี้ (เวอร์ชัน สอง)");
@@ -166,4 +166,15 @@ test("Thai chat laughter becomes an ElevenLabs audio tag only in TTS text", () =
   assert.equal(speechText("555 เธอนี่ตลกจริง ๆ", "th"), "ห้าร้อยห้าสิบห้า เธอนี่ตลกจริง ๆ");
   assert.equal(speechTextWithAudioTags("[playful] 55555 ไม่ได้ขำนะ", "th"), "[playful] [laughs] ไม่ได้ขำนะ");
   assert.equal(speechTextWithAudioTags("5 บาท", "th"), "ห้าบาท");
+});
+
+
+test("standalone non-verbal tags are valid TTS content, not empty speech", () => {
+  for (const tag of ["[laughs]", "[laughing]", "[chuckles]", "[giggles]", "[sighs]", "[clears throat]"]) {
+    assert.equal(hasStandaloneAudioEventTag(tag), true, tag);
+    assert.equal(speechTextWithAudioTags(tag, "th"), tag);
+    assert.equal(speechText(tag, "th"), "");
+  }
+  assert.equal(hasStandaloneAudioEventTag("[playful]"), false);
+  assert.equal(hasStandaloneAudioEventTag("[laughs] สวัสดี"), false);
 });
