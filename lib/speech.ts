@@ -118,12 +118,12 @@ function prepareSpeechText(value: string, language: string, preserveAudioTags: b
   // Thai "555..." and written "ฮ่าๆ" are laughter in chat, not numbers to read aloud.
   // Keep this transformation TTS-only so visible chat text remains unchanged.
   const laughterInput = preserveAudioTags
-    ? value.replace(/(?<![\\p{L}\\p{N}])(?:5{3,}|ฮ่า(?:ๆ|ะ)+)(?![\\p{L}\\p{N}])/gu, (match, offset: number, input: string) => {
+    ? value.replace(/(?<![\p{L}\p{N}])(?:5{3,}|ฮ่า(?:ๆ|ะ)+)(?![\p{L}\p{N}])/gu, (match, offset: number, input: string) => {
         const before = input.slice(Math.max(0, offset - 24), offset);
         const after = input.slice(offset + match.length, offset + match.length + 24);
-        if (/(?:เบอร์|หมายเลข|เลขที่)\\s*$/u.test(before) || /^\\s*(?:บาท|฿|คน|ครั้ง|ชิ้น|วัน|เดือน|ปี|เปอร์เซ็นต์)/u.test(after)) return match;
+        if (/(?:เบอร์|หมายเลข|เลขที่)\s*$/u.test(before) || /^\s*(?:บาท|฿|คน|ครั้ง|ชิ้น|วัน|เดือน|ปี|เปอร์เซ็นต์)/u.test(after)) return match;
         const index = laughterTokens.push("[laughs]") - 1;
-        return `\\uE000L${String.fromCharCode(0xE100 + index)}\\uE001`;
+        return `\uE000L${String.fromCharCode(0xE100 + index)}\uE001`;
       })
     : value;
   const taggedInput = laughterInput.replace(elevenLabsAudioTags, (tag, content: string, offset: number, input: string) => {
@@ -155,8 +155,8 @@ function prepareSpeechText(value: string, language: string, preserveAudioTags: b
   const spoken = language === "th" || (language === "global" && /[ก-๙]/u.test(cleaned)) ? thaiSpeechNumbers(cleaned) : cleaned;
   if (!preserveAudioTags) return spoken;
   return spoken
-    .replace(/\\uE000L([\\uE100-\\uF8FF])\\uE001/gu, (_match, index: string) => laughterTokens[index.charCodeAt(0) - 0xE100] ?? "")
-    .replace(/\\uE000M([\\uE100-\\uF8FF])\\uE001/gu, (_match, index: string) => tags[index.charCodeAt(0) - 0xE100] ?? "");
+    .replace(/\uE000L([\\uE100-\\uF8FF])\uE001/gu, (_match, index: string) => laughterTokens[index.charCodeAt(0) - 0xE100] ?? "")
+    .replace(/\uE000M([\\uE100-\\uF8FF])\uE001/gu, (_match, index: string) => tags[index.charCodeAt(0) - 0xE100] ?? "");
 }
 
 export function speechText(value: string, language = "global"): string {
