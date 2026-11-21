@@ -515,6 +515,7 @@ export class ElevenLabsDialogueTurn {
   }
 
   private dispatchPhrase(ws: WebSocketLike, item: QueuedInput): void {
+    this.audioTagCount += [...item.text.matchAll(/\[[^\]\n]{1,120}\]/gu)].length;
     const newTurn = !this.firstTextSent;
     this.firstTextSent = true;
     if (item.flush) {
@@ -682,6 +683,7 @@ export class ElevenLabsDialogueTurn {
     console.info("ElevenLabs WS turn complete", {
       modelId: AUDIO_STREAM_CONFIG.modelId,
       chunkCount: this.seq,
+      audioTagCount: this.audioTagCount,
       ttfbMs,
       totalDurationMs,
     });
