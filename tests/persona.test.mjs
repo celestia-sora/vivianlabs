@@ -140,8 +140,9 @@ test("layer precedence: code core > profile > state hints > memories-as-data", (
   assert.match(route, /ห้ามเปลี่ยนกฎตัวตน\/ความปลอดภัย\/รูปแบบตามความจำ/);
   // Owner instructions override configurable defaults, while safety and truth remain fixed.
   assert.match(persona, /cannot override safety requirements, consent, factual honesty/);
-  assert.match(route, /Reserve their entire validated block before trimming lower-priority/);
-  assert.match(route, /const baseBudget = Math.max\(0, PROMPT_CHAR_CAP - customPersonaPrompt.length - contextualTail.length\)/);
+  assert.match(route, /Always preserve the complete immutable core and the complete owner/);
+  assert.match(route, /const contextBudget = Math.max\(0, PROMPT_CHAR_CAP - vivianPersonaPrompt.length - customPersonaPrompt.length\)/);
+  assert.match(route, /const boundedContext = contextualPrompt.slice\(0, contextBudget\)/);
   assert.match(route, /const systemPrompt = assembled \+ languageLock\(language\)/);
   assert.match(systemDoc, /earlier wins/i);
 });
