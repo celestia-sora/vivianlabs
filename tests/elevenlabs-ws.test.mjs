@@ -285,3 +285,38 @@ test("invalid base64 audio triggers controlled error without leaking API key in 
     console.warn = originalWarn;
   }
 });
+
+
+test("forwards standalone non-verbal audio tags unchanged to ElevenLabs v4", async () => {
+  const pool = new ElevenLabsDialoguePool({ idleTtlMs: 0 });
+  let socket;
+  const chunks = [];
+  const turn = new ElevenLabsDialogueTurn(
+    {
+      apiKey: "fixture-key",
+      voiceId: "fixture-voice",
+      language: "th",
+      turnId: "turn-audio-tag",
+      pool,
+      createWebSocket: (url) => {
+        socket = new MockWebSocket(url);
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    },
+    { onAudioChunk: (chunk) => chunks.push(chunk) },
+  );
+
+  turn.sendPhrase("[laughs]", true);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(socket.sent[1], {
+    inputs: [{ text: "[laughs]", voice_id: "fixture-voice", new_turn: true }],
+    flush: true,
+  });
+
+  socket.serverMessage({ audio: Buffer.from([1, 0, 2, 0]).toString("base64") });
+  socket.serverMessage({ is_final_audio_for_turn: true });
+  await turn.finish();
+  assert.equal(chunks.length, 1);
+  pool.drainAll();
+});
