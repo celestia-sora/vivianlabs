@@ -24,6 +24,8 @@ export interface TtsTextBufferOptions {
   firstSoftMinChars?: number;
   /** Minimum spoken chars before splitting on a soft boundary (space/comma) for subsequent segments. */
   softMinChars?: number;
+  /** Force a word-boundary split on segment 0 if unpunctuated text reaches this length. */
+  firstMaxSegmentChars?: number;
   /** Force a word-boundary split if a single unpunctuated run reaches this length. */
   maxSegmentChars?: number;
 }
@@ -32,6 +34,7 @@ const CITATION_MARKER = /\n\s*(?:แหล่งข้อมูล|sources)\s*:/
 const TRAILING_STAMMER = /(?:^|[^\p{L}\p{M}\p{N}])[\p{L}\p{M}]{1,12}\s*[-‐‑‒–—]\s*$/u;
 const TRAILING_NUMBER_FRAGMENT = /(?:^|\s)-?\d[\d,.]*$/u;
 const TIME_ABBREV_AT = /(?:^|\s)(?:[01]?\d|2[0-3]):[0-5]\d\s*น\.$/u;
+const HAS_THAI = /[ก-๙]/u;
 
 const thaiWordSegmenter =
   typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
@@ -122,6 +125,7 @@ export class TtsTextBuffer {
   private readonly maxVisibleChars: number;
   private readonly firstSoftMinChars: number;
   private readonly softMinChars: number;
+  private readonly firstMaxSegmentChars: number;
   private readonly maxSegmentChars: number;
 
   private rawBuffer = "";
@@ -134,9 +138,10 @@ export class TtsTextBuffer {
   constructor(options: TtsTextBufferOptions = {}) {
     this.language = options.language ?? "global";
     this.maxVisibleChars = options.maxVisibleChars ?? replyCharacterLimit;
-    this.firstSoftMinChars = options.firstSoftMinChars ?? 22;
-    this.softMinChars = options.softMinChars ?? 30;
-    this.maxSegmentChars = options.maxSegmentChars ?? 110;
+    this.firstSoftMinChars = options.firstSoftMinChars ?? 14;
+    this.softMinChars = options.softMinChars ?? 26;
+    this.firstMaxSegmentChars = options.firstMaxSegmentChars ?? 38;
+    this.maxSegmentChars = options.maxSegmentChars ?? 90;
   }
 
   /**
@@ -261,10 +266,14 @@ export class TtsTextBuffer {
       this.rawBuffer = rest.replace(/^[ \t]+/, "");
       const index = this.segmentIndex++;
       const isFirst = index === 0;
+      // ElevenLabs TTD holds text until ~40 chars AND 8 whitespace-delimited words
+      // unless flush=true is sent. Thai rarely uses spaces, so flush Thai segments
+      // and the first phrase promptly to guarantee immediate streaming playback.
       const shouldFlush =
         atEnd ||
+        isFirst ||
         candidate.strong ||
-        (isFirst && clean.length >= this.firstSoftMinChars);
+        HAS_THAI.test(clean);
 
       out.push({
         taggedText: tagged,
@@ -370,9 +379,10 @@ export class TtsTextBuffer {
 
     // 3. Hard ceiling for long unspaced Thai text (use Intl.Segmenter word boundaries)
     if (!atEnd && !isInsideUnclosedStructure(buf, buf.length)) {
+      const maxCeiling = isFirst ? this.firstMaxSegmentChars : this.maxSegmentChars;
       const cleanWhole = speechText(buf, this.language);
-      if (cleanWhole.length >= this.maxSegmentChars) {
-        const wordSplit = this.findThaiWordSplit(buf);
+      if (cleanWhole.length >= maxCeiling) {
+        const wordSplit = this.findThaiWordSplit(buf, softMin, maxCeiling);
         if (wordSplit !== null && wordSplit > 0) {
           return { splitAt: wordSplit, strong: false };
         }
@@ -390,18 +400,22 @@ export class TtsTextBuffer {
     return clean.length >= minCleanChars;
   }
 
-  private findThaiWordSplit(buf: string): number | null {
+  private findThaiWordSplit(buf: string, minChars: number, maxCeiling: number): number | null {
     if (!thaiWordSegmenter) return null;
-    // Pick a split near ~65% of maxSegmentChars so the next segment isn't tiny
-    const target = Math.floor(this.maxSegmentChars * 0.72);
+    // Pick a split near ~72% of maxCeiling so both halves sound natural.
+    const target = Math.max(minChars, Math.floor(maxCeiling * 0.72));
     let lastValid = 0;
     for (const seg of thaiWordSegmenter.segment(buf)) {
       const end = seg.index + seg.segment.length;
       if (end > buf.length - 4) break;
+      // Never split inside an ASCII word, version number, or decimal.
+      const prev = buf[end - 1] ?? "";
+      const next = buf[end] ?? "";
+      if (/[A-Za-z0-9.]/.test(prev) && /[A-Za-z0-9.]/.test(next)) continue;
       if (!isInsideUnclosedStructure(buf, end)) {
         const slice = buf.slice(0, end);
         const clean = speechText(slice, this.language).trim();
-        if (clean.length >= this.softMinChars && !TRAILING_NUMBER_FRAGMENT.test(slice) && !TRAILING_STAMMER.test(slice)) {
+        if (clean.length >= minChars && !TRAILING_NUMBER_FRAGMENT.test(slice) && !TRAILING_STAMMER.test(slice)) {
           lastValid = end;
           if (clean.length >= target) return end;
         }
