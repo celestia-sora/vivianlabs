@@ -256,6 +256,8 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/scenes": scenes,
     "@/lib/chat-decision": fixturePlan,
     "@/lib/chat-stream": load("../lib/chat-stream.ts", {}, { Response, ReadableStream, TextEncoder, TextDecoder }),
+    "@/lib/elevenlabs-voice": { resolveElevenLabsVoiceId: async () => "fixture-voice" },
+    "@/lib/tts-stream-session": { StreamingTtsSession: class { pushDelta() {} async finish() {} abort() {} } },
     // Phase 2 memory: real pure helpers; consolidation side-effects stubbed
     // so chat fixtures never write. Flags default OFF in this sandbox env,
     // keeping legacy behavior asserted below.

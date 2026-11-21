@@ -1,7 +1,17 @@
 export interface TokenTiming { preparationMs: number; providerMs: number }
 
+export interface ChatStreamControl {
+  emit: (event: Record<string, unknown>) => void;
+  emitReply: (status: number, data: unknown) => void;
+}
+
 /** Consume provider SSE without exposing unsanitized dialogue to the UI. */
-export async function readProviderStream(response: Response, format: "openai" | "gemini", firstToken: () => void): Promise<Response> {
+export async function readProviderStream(
+  response: Response,
+  format: "openai" | "gemini",
+  firstToken: () => void,
+  onDelta?: (delta: string) => void,
+): Promise<Response> {
   if (!response.ok || !response.headers.get("content-type")?.includes("text/event-stream")) return response;
   if (!response.body) throw new Error("Chat stream is empty.");
   const reader = response.body.getReader(), decoder = new TextDecoder();
@@ -21,6 +31,7 @@ export async function readProviderStream(response: Response, format: "openai" | 
       if (!observed) { observed = true; firstToken(); }
       text += delta;
       if (text.length > 100_000) throw new Error("Chat stream exceeds reply limit.");
+      onDelta?.(delta);
     }
     if (Array.isArray(choice?.delta?.annotations)) annotations.push(...choice.delta.annotations);
     if (candidate?.groundingMetadata) grounding = candidate.groundingMetadata;
@@ -49,24 +60,54 @@ export async function readProviderStream(response: Response, format: "openai" | 
 
 /** Timing-only NDJSON contains no partial dialogue. The final reply retains the
  * existing sanitized JSON contract and authenticated error status. */
-export function timedChatResponse(reply: (firstToken: (provider: string, timing?: TokenTiming) => void) => Promise<Response>): Response {
+export function timedChatResponse(
+  reply: (
+    firstToken: (provider: string, timing?: TokenTiming) => void,
+    stream: ChatStreamControl,
+  ) => Promise<Response>,
+): Response {
   let cancelled = false;
+  let replyEmitted = false;
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (value: unknown) => { if (!cancelled) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)); };
+      const emit = (value: unknown) => {
+        if (!cancelled) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+      };
+      const control: ChatStreamControl = {
+        emit: (event) => emit(event),
+        emitReply: (status, data) => {
+          if (replyEmitted) return;
+          replyEmitted = true;
+          emit({ event: "reply", status, data });
+        },
+      };
       try {
-        const response = await reply((provider, timing) => emit({ event: "first_token", provider, timing }));
-        emit({ event: "reply", status: response.status, data: await response.json() });
-      } catch { emit({ event: "reply", status: 500, data: { error: "Chat request failed" } }); }
-      finally { if (!cancelled) controller.close(); }
+        const response = await reply(
+          (provider, timing) => emit({ event: "first_token", provider, timing }),
+          control,
+        );
+        if (!replyEmitted) {
+          emit({ event: "reply", status: response.status, data: await response.json() });
+        }
+      } catch {
+        if (!replyEmitted) {
+          emit({ event: "reply", status: 500, data: { error: "Chat request failed" } });
+        }
+      } finally {
+        if (!cancelled) controller.close();
+      }
     },
     cancel() { cancelled = true; },
   });
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" } });
 }
 
-export async function readChatResponse<T>(response: Response, firstToken: (provider: string, timing?: TokenTiming) => void): Promise<{ data: T; ok: boolean }> {
+export async function readChatResponse<T>(
+  response: Response,
+  firstToken: (provider: string, timing?: TokenTiming) => void,
+  onEvent?: (event: Record<string, unknown>) => void,
+): Promise<{ data: T; ok: boolean }> {
   if (!response.headers.get("content-type")?.includes("application/x-ndjson")) return { data: await response.json() as T, ok: response.ok };
   if (!response.body) throw new Error("Chat response is empty.");
   const reader = response.body.getReader(), decoder = new TextDecoder();
@@ -80,12 +121,13 @@ export async function readChatResponse<T>(response: Response, firstToken: (provi
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
         if (line.length > 256_000) throw new Error("Chat response exceeds limit.");
         if (!line.trim()) continue;
-        const event = JSON.parse(line);
+        const event = JSON.parse(line) as Record<string, unknown>;
+        onEvent?.(event);
         if (event.event === "first_token") {
-          const timing = event.timing;
+          const timing = event.timing as TokenTiming | undefined;
           firstToken(String(event.provider), timing && Number.isFinite(timing.preparationMs) && Number.isFinite(timing.providerMs) ? timing : undefined);
         }
-        if (event.event === "reply") result = { data: event.data as T, ok: event.status >= 200 && event.status < 300 };
+        if (event.event === "reply") result = { data: event.data as T, ok: Number(event.status) >= 200 && Number(event.status) < 300 };
       }
       if (buffer.length > 256_000) throw new Error("Chat response exceeds limit.");
       if (chunk.done) break;

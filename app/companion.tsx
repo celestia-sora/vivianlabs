@@ -10,6 +10,7 @@ import { loadModelPreviews, removeModelPreview, saveModelPreview } from "@/lib/m
 import { faceCrop, SNAPSHOT_PREVIEW_PATH, snapshotToBlob } from "@/lib/model-snapshot";
 import { scheduleBackgroundWork } from "@/lib/startup-background";
 import { readChatResponse } from "@/lib/chat-stream";
+import { AudioStreamingManager, type AudioContextLike } from "@/lib/audio-streaming";
 import { startTiming, finishTiming, cancelTiming, type LocalTiming } from "@/lib/performance";
 import { shouldPauseModelStartup, clearModelLoadState } from "@/lib/model-startup";
 import { stepSimulation, easeDisplayed, desiredUploadPercent } from "@/lib/upload-progress";
@@ -176,6 +177,9 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const speakIdRef = useRef(0);
   const audioUnlockedByUserRef = useRef(false);
   const ttsAbortRef = useRef<AbortController | null>(null);
+  const chatStreamAbortRef = useRef<AbortController | null>(null);
+  const userInterruptedRef = useRef(false);
+  const audioStreamingRef = useRef<AudioStreamingManager | null>(null);
   const sendingRef = useRef(false);
   const resettingRef = useRef(false);
   const memoryGenerationRef = useRef(0);
@@ -1458,6 +1462,10 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   useEffect(() => () => {
     micEnabledRef.current = false;
     stopRecording();
+    chatStreamAbortRef.current?.abort();
+    chatStreamAbortRef.current = null;
+    audioStreamingRef.current?.dispose();
+    audioStreamingRef.current = null;
   }, []);
 
   async function loadMemory() {
@@ -1492,6 +1500,10 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }
   function stopSpeech() {
     speakIdRef.current += 1;
+    userInterruptedRef.current = true;
+    chatStreamAbortRef.current?.abort();
+    chatStreamAbortRef.current = null;
+    audioStreamingRef.current?.interrupt();
     ttsAbortRef.current?.abort();
     ttsAbortRef.current = null;
     const audio = audioRef.current;
@@ -1509,7 +1521,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return Promise.resolve();
     audioContextRef.current ??= new AudioContextClass();
-    if (audioPrimedRef.current && audioContextRef.current.state !== "suspended") return Promise.resolve();
+    if (audioPrimedRef.current && audioContextRef.current.state === "running") return Promise.resolve();
     if (audioUnlockPromiseRef.current) return withTimeout(audioUnlockPromiseRef.current, AUDIO_UNLOCK_MS, undefined);
     const context = audioContextRef.current;
     const audio = audioRef.current ?? new Audio();
@@ -1519,7 +1531,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     audio.muted = true;
     audioRef.current = audio;
     const unlock = (async () => {
-      if (context.state === "suspended") await withTimeout(context.resume().then(() => undefined), 800, undefined);
+      if (context.state !== "running") await withTimeout(context.resume().then(() => undefined), 800, undefined);
       try {
         await withTimeout(audio.play().then(() => undefined), AUDIO_UNLOCK_MS, undefined);
         audio.pause();
@@ -1530,6 +1542,79 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     })();
     audioUnlockPromiseRef.current = unlock.finally(() => { audioUnlockPromiseRef.current = null; });
     return audioUnlockPromiseRef.current;
+  }
+  function startStreamingLipSync() {
+    const streamer = audioStreamingRef.current;
+    const analyser = streamer?.getAnalyser();
+    if (!streamer || !analyser) return;
+    stopLipSync();
+    const samples = new Uint8Array(analyser.fftSize);
+    const spectrum = new Uint8Array(analyser.frequencyBinCount);
+    const apple = usesNativeAppleAudio();
+    let smoothed = 0;
+    let silentFrames = 0;
+    const startedAt = performance.now();
+    const update = () => {
+      if (!streamer.isPlaying() && !speakingRef.current) { setMouthOpen(0); lipSyncFrameRef.current = null; return; }
+      analyser.getByteTimeDomainData(samples);
+      analyser.getByteFrequencyData(spectrum);
+      let rms = 0;
+      for (const sample of samples) { const delta = (sample - 128) / 128; rms += delta * delta; }
+      rms = Math.sqrt(rms / samples.length);
+      let energy = 0;
+      for (let index = 1; index < spectrum.length; index += 1) energy += spectrum[index];
+      const spectralLevel = spectrum.length > 1 ? energy / ((spectrum.length - 1) * 255) : 0;
+      const level = Math.min(1, rms * 4.8 + spectralLevel * 1.8);
+      let target: number;
+      if (level > 0.002) {
+        silentFrames = 0;
+        target = Math.max(0, Math.min(.9, Math.pow(level, .72)));
+      } else if (apple && ++silentFrames > 10) {
+        const elapsed = (performance.now() - startedAt) / 1000;
+        target = Math.min(.62, .08 + (Math.sin(elapsed * 17) * .5 + .5) * .34 + (Math.sin(elapsed * 31) * .5 + .5) * .12);
+      } else {
+        target = 0;
+      }
+      smoothed += (target - smoothed) * (target > smoothed ? .5 : .18);
+      setMouthOpen(smoothed);
+      lipSyncFrameRef.current = requestAnimationFrame(update);
+    };
+    lipSyncFrameRef.current = requestAnimationFrame(update);
+  }
+  function getAudioStreamer(): AudioStreamingManager {
+    if (!audioStreamingRef.current) {
+      audioStreamingRef.current = new AudioStreamingManager({
+        onPlaybackStart: () => {
+          speakingRef.current = true;
+          setSpeaking(true);
+          startStreamingLipSync();
+        },
+        onPlaybackEnd: () => {
+          speakingRef.current = false;
+          setSpeaking(false);
+          stopLipSync();
+        },
+        onInterrupt: () => {
+          speakingRef.current = false;
+          setSpeaking(false);
+          stopLipSync();
+        },
+        onError: (_turnId, error, audioStarted) => {
+          if (!audioStarted) {
+            speakingRef.current = false;
+            setSpeaking(false);
+            stopLipSync();
+            console.warn("Streaming TTS unavailable; falling back", error.message);
+          } else {
+            console.warn("Streaming TTS ended early", error.message);
+          }
+        },
+      });
+    }
+    if (audioContextRef.current) {
+      audioStreamingRef.current.setContext(audioContextRef.current as unknown as AudioContextLike);
+    }
+    return audioStreamingRef.current;
   }
   function setMouthOpen(value: number) {
     const coreModel = modelRef.current?.internalModel?.coreModel;
@@ -1728,6 +1813,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       return;
     }
     if (speakingRef.current) stopSpeech();
+    userInterruptedRef.current = false;
     markActivity();
     interactedRef.current = true;
     const displayText = text || (imageToSend ? "[ส่งรูปภาพ]" : "");
@@ -1742,11 +1828,38 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     const requestConversationId = activeConversationRef.current;
     const firstTokenTiming = startTiming("send_to_first_token");
     const replyTiming = startTiming("send_to_reply");
+    const shouldStreamAudio = !mutedRef.current;
+    const turnId = crypto.randomUUID();
+    const chatAbort = new AbortController();
+    chatStreamAbortRef.current = chatAbort;
+    let streamWatchdog: number | undefined;
+    const armWatchdog = (ms: number) => {
+      if (streamWatchdog !== undefined) window.clearTimeout(streamWatchdog);
+      streamWatchdog = window.setTimeout(() => chatAbort.abort(), ms);
+    };
+    armWatchdog(CHAT_TIMEOUT_MS);
+
+    let streamer: AudioStreamingManager | null = null;
+    if (shouldStreamAudio) {
+      void unlockAudio();
+      streamer = getAudioStreamer();
+      streamer.startTurn(turnId, audioContextRef.current as unknown as AudioContextLike | null);
+    }
+
+    type ChatPayload = { scene?: SceneDecision; text?: string; error?: string; code?: string; memories?: Memory[]; companion?: CompanionState };
+    let resolveReply!: (value: { data: ChatPayload; ok: boolean }) => void;
+    let rejectReply!: (reason: unknown) => void;
+    let replySettled = false;
+    const replyPromise = new Promise<{ data: ChatPayload; ok: boolean }>((resolve, reject) => {
+      resolveReply = (value) => { if (!replySettled) { replySettled = true; resolve(value); } };
+      rejectReply = (reason) => { if (!replySettled) { replySettled = true; reject(reason); } };
+    });
+
     try {
       const response = await authFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
-        signal: abortAfter(CHAT_TIMEOUT_MS),
+        signal: chatAbort.signal,
         body: JSON.stringify({
           mode: "chat",
           conversationId: requestConversationId,
@@ -1758,23 +1871,102 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
           image: imageToSend ?? undefined,
           character: selectedModel,
           language: speechLanguageRef.current,
+          streamAudio: shouldStreamAudio,
+          voiceId: voiceIdRef.current,
+          turnId,
         }),
       });
-      const { data, ok } = await readChatResponse<{ scene?: SceneDecision; text?: string; error?: string; code?: string; memories?: Memory[]; companion?: CompanionState }>(response, (provider, timing) => {
-        const elapsed = performance.now() - (firstTokenTiming?.start ?? performance.now());
-        finishTiming(firstTokenTiming, {
-          provider, ...(timing ?? {}),
-          ...(timing ? { transportAndClientMs: Math.max(0, elapsed - timing.preparationMs - timing.providerMs) } : {}),
-        });
+      const streamPromise = readChatResponse<ChatPayload>(
+        response,
+        (provider, timing) => {
+          const elapsed = performance.now() - (firstTokenTiming?.start ?? performance.now());
+          finishTiming(firstTokenTiming, {
+            provider, ...(timing ?? {}),
+            ...(timing ? { transportAndClientMs: Math.max(0, elapsed - timing.preparationMs - timing.providerMs) } : {}),
+          });
+        },
+        (event) => {
+          const eventType = event.event;
+          if (eventType === "reply") {
+            armWatchdog(TTS_TIMEOUT_MS);
+            resolveReply({
+              data: event.data as ChatPayload,
+              ok: Number(event.status) >= 200 && Number(event.status) < 300,
+            });
+            return;
+          }
+          if (!streamer || mutedRef.current) return;
+          if (eventType === "audio_chunk") {
+            armWatchdog(TTS_TIMEOUT_MS);
+            if (audioContextRef.current) {
+              streamer.setContext(audioContextRef.current as unknown as AudioContextLike);
+            }
+            streamer.enqueueChunk({
+              turnId: String(event.turnId ?? ""),
+              seq: Number(event.seq ?? 0),
+              audio: String(event.audio ?? ""),
+              sampleRate: typeof event.sampleRate === "number" ? event.sampleRate : undefined,
+            });
+          } else if (eventType === "audio_reset") {
+            streamer.resetAttempt(String(event.turnId ?? ""));
+          } else if (eventType === "audio_turn_end") {
+            if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
+            streamer.markTurnComplete(String(event.turnId ?? ""));
+          } else if (eventType === "audio_error") {
+            if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
+            streamer.markTurnError(String(event.turnId ?? ""), String(event.error ?? "Audio streaming failed"));
+          }
+        },
+      ).then((res) => {
+        if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
+        resolveReply(res);
+        return res;
+      }).catch((err) => {
+        if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
+        rejectReply(err);
+        if (streamer && !streamer.hasStartedPlayback()) {
+          streamer.markTurnError(turnId, err instanceof Error ? err.message : "Audio stream aborted");
+        }
+        throw err;
       });
+      // Background audio chunk errors after reply has settled are handled by streamer callbacks.
+      void streamPromise.catch(() => {});
+
+      const { data, ok } = await replyPromise;
       finishTiming(replyTiming);
       if (!ok || !data?.text) throw new Error(data?.code ?? data?.error ?? "Chat request failed");
       sceneLibrary.applyChatScene(data.scene, sceneGeneration);
       const reply = data.text;
       setErrorNotice(null);
+
       // Do not reveal the reply bubble before TTS playback has started. This
       // keeps the visible text and spoken response arriving together.
-      if (!muted) await speak(reply, startTiming("reply_to_audio_start"));
+      if (!mutedRef.current) {
+        if (streamer) {
+          const replyToAudioTiming = startTiming("reply_to_audio_start");
+          const playbackResult = await withTimeout(
+            streamer.waitForPlaybackStart(),
+            TTS_TIMEOUT_MS,
+            { started: false, interrupted: false },
+          );
+          if (chatAbort.signal.aborted || playbackResult.interrupted) {
+            cancelTiming(replyToAudioTiming);
+            return;
+          }
+          if (playbackResult.started || streamer.hasStartedPlayback()) {
+            finishTiming(replyToAudioTiming);
+          } else {
+            cancelTiming(replyToAudioTiming);
+            // Only fall back to non-streaming TTS if zero streaming audio started.
+            streamer.interrupt();
+            await speak(reply, startTiming("reply_to_audio_start"));
+          }
+        } else {
+          await speak(reply, startTiming("reply_to_audio_start"));
+        }
+      }
+
+      if (chatAbort.signal.aborted && userInterruptedRef.current) return;
       setMessages((current) => [...current, historyMessage("vivian", reply, replyMessageId)]);
       const nextCompanion = normalizeCompanion(data.companion);
       if (nextCompanion) setCompanion(nextCompanion);
@@ -1784,6 +1976,10 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       void playReaction(reply, text, false);
       void loadMemory();
     } catch (error) {
+      if (chatAbort.signal.aborted && userInterruptedRef.current) {
+        return;
+      }
+      streamer?.interrupt();
       console.error("Vivian response unavailable", error);
       resetReaction();
       const message = error instanceof Error && error.message.includes("RATE_LIMITED") ? "หยุดส่งข้อความ รอให้ระบบพร้อมก่อน"
@@ -1793,6 +1989,8 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       setErrorNotice(message);
       setMessages((current) => [...current, historyMessage("vivian", message)]);
     } finally {
+      if (streamWatchdog !== undefined) window.clearTimeout(streamWatchdog);
+      if (chatStreamAbortRef.current === chatAbort) chatStreamAbortRef.current = null;
       cancelTiming(firstTokenTiming); cancelTiming(replyTiming);
       setSending(false);
       sendingRef.current = false;
@@ -2261,6 +2459,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }, [sidebarOpen, panel]);
   function selectConversation(conversation: Conversation) {
     if (sending || resettingRef.current || !history.ready) return;
+    stopSpeech();
     setErrorNotice(null);
     setActiveConversationId(conversation.id);
     window.localStorage.setItem("vivian-active-conversation", conversation.id);
@@ -2269,6 +2468,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }
   function newConversation() {
     if (sending || resettingRef.current || !history.ready) return;
+    stopSpeech();
     setPreviewConversationId(null);
     setErrorNotice(null);
     const id = crypto.randomUUID();
@@ -2639,7 +2839,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
             </>}
             {panel === "scenes" && <><SceneManager library={sceneLibrary}/><p className="floating-note">Default backgrounds</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
             {panel === "voice" && <>
-              <button type="button" className="floating-option" onClick={() => setMuted((value) => !value)}>
+              <button type="button" className="floating-option" onClick={() => { setMuted((value) => { const next = !value; if (next) stopSpeech(); return next; }); }}>
                 <Icon name="sound" size={18}/> Vivian voice <strong>{muted ? "Off" : "On"}</strong>
               </button>
               <div className="custom-instructions voice-id-preferences">
