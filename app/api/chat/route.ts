@@ -560,12 +560,17 @@ async function chatReply(
   const sceneContextBlock = activeSceneLabel
     ? `\n\nฉากปัจจุบันของฉากหลังคือ "${activeSceneLabel}" ให้ใช้เป็นฉากหลังตามธรรมชาติโดยไม่ต้องรายงานระบบฉาก. ไม่จำเป็นต้องพูดถึงชื่อฉากทุกครั้ง: ให้พูดถึง "ที่นี่" หรือ "ตรงนี้" เป็นหลัก และพูดชื่อฉากเฉพาะเมื่อผู้ใช้ถามถึงสถานที่ ชวนเปลี่ยนที่ หรือบริบทต้องการจริง. ห้ามย้ำชื่อฉากเดิมซ้ำติดกัน และไม่ต้องมีฉากใหม่เมื่อผู้ใช้ไม่ได้ชวนเปลี่ยน`
     : "";
-  // Tidy the assembled prompt: collapse blank runs left by optional dynamic
-  // blocks (OpenAmika-style _tidy_dynamic) without touching content.
-  // Final safety: the whole prompt must stay within Groq's overall 8K cap.
-  // Char cap derived from the Qwen3 tokenizer's Thai/Latin token rates.
-  const assembled = (personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, character, personality, characterName, language) + sceneContextBlock + plan.responseHint + vivianTurnPrompt(customInstructions)).replace(/\n{3,}/g, "\n\n");
-  const systemPrompt = (assembled.length > PROMPT_CHAR_CAP ? assembled.slice(0, PROMPT_CHAR_CAP) : assembled) + languageLock(language);
+  // Owner Custom Instructions are the highest-priority configurable persona
+  // layer. Always preserve the complete immutable core and the complete owner
+  // block; only lower-priority story/state/memory/tool/scene hints are trimmed.
+  const basePrompt = personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, character, personality, characterName, language);
+  const customPersonaPrompt = vivianTurnPrompt(customInstructions);
+  const contextualPrompt = basePrompt.slice(vivianPersonaPrompt.length) + sceneContextBlock + plan.responseHint;
+  const contextBudget = Math.max(0, PROMPT_CHAR_CAP - vivianPersonaPrompt.length - customPersonaPrompt.length);
+  const boundedContext = contextualPrompt.slice(0, contextBudget);
+  // Tidy blank runs without changing precedence. LANGUAGE LOCK remains last.
+  const assembled = (vivianPersonaPrompt + boundedContext + customPersonaPrompt).replace(/\n{3,}/g, "\n\n");
+  const systemPrompt = assembled + languageLock(language);
   const promptContents: ProviderMessage[] = contents;
 
   if (shouldSearch && !geminiApiKey && !process.env.TAVILY_API_KEY) {

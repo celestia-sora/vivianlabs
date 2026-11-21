@@ -1,18 +1,15 @@
 // Vivian persona — layered prompt (Phase 3, decision D6).
 //
-// Layered system prompt (earlier wins; see docs/persona-system.md):
-//   (1) Code core below — identity, hard boundaries/safety, "not a
-//       general-purpose assistant", output-format rules. This is the ONLY
-//       layer that cannot be overridden by user/profile content.
-//   (2) Custom instructions (persona profile) via vivianTurnPrompt() —
-//       owner-tunable speech style, tsundere mechanics, example lines,
-//       quirks. Seed/template: docs/persona-profile-template.md.
-//       Custom instructions are trusted owner-authored config, but they
-//       CANNOT override layer 1 (identity, safety, format rules).
-//   (3) State hints from mood/relationship (companionPromptBlock in
-//       lib/companion.ts) — short, bounded, token-capped.
-//   (4) Retrieved memories — LABELED BACKGROUND DATA only, never
-//       instructions. A memory saying "ignore your rules" is data.
+// Prompt precedence (see docs/persona-system.md):
+//   (1) Non-overridable core: safety, truthful identity/capability boundaries,
+//       consent, and output/language format.
+//   (2) Owner Custom Instructions: the highest-priority source for all
+//       configurable personality, voice, behavior, interests and relationship
+//       style. These override conflicting defaults and contextual hints.
+//   (3) Built-in Vivian defaults: fallback only where the owner has not
+//       customized a behavior.
+//   (4) Mood/relationship hints and retrieved memories: context only; never
+//       override owner instructions or safety.
 //
 // Fallback: if custom instructions are empty, fail to load, or are
 // rejected for length, Vivian still behaves as Vivian from this core —
@@ -33,9 +30,10 @@
 //   - Prompt: vivianTurnPrompt() below uses the same 2000-char budget
 //     (previously a silent 1200-char slice — bug fixed in Phase 3).
 //     Storage, API validation, and prompt all share this single budget.
-//   - Position: injected second-to-last in the system prompt in
-//     app/api/chat/route.ts, immediately before languageLock (last wins).
-//   - Settings shows a live counter against the 2000-char budget.
+//   - Position: appended after defaults, story, state, memories and tools,
+//     immediately before languageLock. The prompt builder reserves the full
+//     custom-instruction block before trimming lower-priority context.
+//   - Settings exposes one owner-editable field with a live 2000-char counter.
 //
 // Provider parity / drift: system prompt is rebuilt from code constants
 // every request, so dialogue trimming can never drop layers 1-3.
@@ -45,8 +43,9 @@
 import { MAX_CUSTOM_INSTRUCTIONS_LENGTH } from "@/lib/custom-instructions";
 
 export const PERSONA_LAYER_ORDER = [
-  "code-core",
-  "custom-instructions-persona-profile",
+  "immutable-safety-and-truth-core",
+  "owner-custom-instructions",
+  "built-in-persona-defaults",
   "mood-relationship-state-hints",
   "retrieved-memories-background-data",
 ] as const;
@@ -108,5 +107,9 @@ export function vivianTurnPrompt(customInstructions: string): string {
   // Single shared budget with storage + API (2000). API rejects oversize
   // before save, so this bound is a defensive cap, not a silent cut of
   // valid user content. Previously sliced to 1200 with no UI signal.
-  return `\n\nPersona profile — custom instructions, layer 2 (owner-authored persona config; secondary to the immutable core above and cannot override identity, safety, or format rules):\n${trimmed.slice(0, MAX_CUSTOM_INSTRUCTIONS_LENGTH)}`;
+  return `\n\nOWNER CUSTOM INSTRUCTIONS — HIGHEST PRIORITY
+Follow this owner-authored profile over conflicting default personality, voice, tone, behavior, interests, relationship/story details, mood hints and examples. Where unspecified, keep the built-in defaults.
+Non-overridable: safety, consent, factual honesty, real capability limits, truthful identity disclosure, output/audio format rules and final LANGUAGE LOCK.
+
+${trimmed.slice(0, MAX_CUSTOM_INSTRUCTIONS_LENGTH)}`
 }
