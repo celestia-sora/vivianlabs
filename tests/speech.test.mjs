@@ -160,7 +160,7 @@ test("Thai chat laughter becomes an ElevenLabs audio tag only in TTS text", () =
   }
   assert.equal(speechTextWithAudioTags("55555", "th"), "[laughs]");
   assert.equal(speechTextWithAudioTags("5555 บาท", "th"), "ห้าพันห้าร้อยห้าสิบห้าบาท");
-  assert.equal(speechTextWithAudioTags("เบอร์ 555", "th"), "เบอร์ ห้า ห้า ห้า");
+  assert.equal(speechTextWithAudioTags("เบอร์ 555", "th"), "เบอร์ ห้าร้อยห้าสิบห้า");
   assert.equal(speechTextWithAudioTags("ราคา 555 บาท", "th"), "ราคา ห้าร้อยห้าสิบห้าบาท");
   assert.equal(speechText("55555", "th"), "ห้าหมื่นห้าพันห้าร้อยห้าสิบห้า");
   assert.equal(speechText("555 เธอนี่ตลกจริง ๆ", "th"), "ห้าร้อยห้าสิบห้า เธอนี่ตลกจริง ๆ");
