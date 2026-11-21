@@ -1,4 +1,4 @@
-import { readProviderStream, timedChatResponse, type TokenTiming } from "@/lib/chat-stream";
+import { readProviderStream, timedChatResponse, type ChatStreamControl, type TokenTiming } from "@/lib/chat-stream";
 import { historyUuid } from "@/lib/chat-history";
 import { saveHistory } from "@/lib/chat-history-store";
 import { requireApiAccess } from "@/lib/auth/server";
@@ -7,6 +7,8 @@ import { applyConversationTurn, companionPromptBlock, type CompanionState } from
 import { vivianPersonaPrompt, vivianTurnPrompt } from "@/lib/vivian-persona";
 import { VIVIAN_STORY } from "@/lib/vivian-story";
 import { loadCompanionState, saveCompanionState } from "@/lib/companion-store";
+import { resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
+import { StreamingTtsSession } from "@/lib/tts-stream-session";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { runTools, toolsPromptBlock, webSearchTool, visionSearchIntent } from "@/lib/tools";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
@@ -88,7 +90,7 @@ async function callGroq(
   apiKey: string,
   messages: any[],
   model = groqModelName(),
-  options: { timeoutMs?: number; json?: boolean; jsonSchema?: { name: string; schema: object }; maxTokens?: number; firstToken?: () => void } = {}
+  options: { timeoutMs?: number; json?: boolean; jsonSchema?: { name: string; schema: object }; maxTokens?: number; firstToken?: () => void; onDelta?: (delta: string) => void } = {}
 ) {
   const payload: Record<string, unknown> = {
     model,
@@ -133,7 +135,7 @@ async function callGroq(
       body: JSON.stringify(activePayload),
     });
     if (response.status !== 429 || attempt === 1) {
-      return options.firstToken ? readProviderStream(response, "openai", options.firstToken) : response;
+      return options.firstToken ? readProviderStream(response, "openai", options.firstToken, options.onDelta) : response;
     }
     const limitTokensRaw = response.headers.get("x-ratelimit-limit-tokens");
     const remainingTokensRaw = response.headers.get("x-ratelimit-remaining-tokens");
@@ -183,7 +185,7 @@ function compactGroqMessages(messages: any[]): any[] {
   return [...(compactSystem ? [compactSystem] : []), ...compactDialogue];
 }
 
-async function callGemini(apiKey: string, payload: Record<string, unknown>, model = geminiPrimaryModel(), options: { version?: string; timeoutMs?: number; firstToken?: () => void } = {}) {
+async function callGemini(apiKey: string, payload: Record<string, unknown>, model = geminiPrimaryModel(), options: { version?: string; timeoutMs?: number; firstToken?: () => void; onDelta?: (delta: string) => void } = {}) {
   const cleanKey = apiKey.trim();
   const version = options.version ?? "v1beta";
   const timeoutMs = options.timeoutMs ?? providerTimeoutMs;
@@ -193,7 +195,7 @@ async function callGemini(apiKey: string, payload: Record<string, unknown>, mode
     signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify(payload),
   });
-  return options.firstToken ? readProviderStream(response, "gemini", options.firstToken) : response;
+  return options.firstToken ? readProviderStream(response, "gemini", options.firstToken, options.onDelta) : response;
 }
 
 async function extractMemories(apiKey: string, userText: string, sourceMessageIds: string[] = []): Promise<ExtractedItem[]> {
@@ -398,11 +400,17 @@ export async function POST(request: Request) {
   const quota = rateLimit(request, "chat", 20);
   if (!quota.allowed) return rateLimitedResponse(quota.retryAfter);
   return request.headers.get("accept")?.includes("application/x-ndjson")
-    ? timedChatResponse((firstToken) => chatReply(request, authenticatedUserId, requestStarted, firstToken))
+    ? timedChatResponse((firstToken, streamControl) => chatReply(request, authenticatedUserId, requestStarted, firstToken, streamControl))
     : chatReply(request, authenticatedUserId, requestStarted);
 }
 
-async function chatReply(request: Request, authenticatedUserId: string | null, requestStarted: number, firstToken?: (provider: string, timing?: TokenTiming) => void) {
+async function chatReply(
+  request: Request,
+  authenticatedUserId: string | null,
+  requestStarted: number,
+  firstToken?: (provider: string, timing?: TokenTiming) => void,
+  streamControl?: ChatStreamControl,
+) {
   const groqApiKey = process.env.GROQ_API_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!groqApiKey && !geminiApiKey) {
@@ -422,12 +430,18 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     interrupted?: boolean;
     character?: string;
     personality?: string;
-    characterName?: string;    language?: string;
+    characterName?: string;
+    language?: string;
+    streamAudio?: boolean;
+    voiceId?: string;
+    turnId?: string;
   };
   const character: CharacterKey = "Miss";
   const personality = body.personality === "shy" || body.personality === "playful" || body.personality === "elegant" ? body.personality : "custom";
   const characterName = typeof body.characterName === "string" && body.characterName.trim() ? body.characterName.trim().slice(0, 40) : "Vivian";
   const language = body.language === "global" || body.language === "en" || body.language === "ja" || body.language === "ko" || body.language === "zh" || body.language === "th" ? body.language : "global";
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
+  const streamAudio = body.streamAudio === true && Boolean(streamControl) && Boolean(elevenLabsKey);
   const hasImage = typeof body.image === "string" && body.image.length > 50;
   if (body.conversationId !== undefined && (!historyUuid(body.conversationId) || !historyUuid(body.userMessageId) || !historyUuid(body.assistantMessageId) || typeof body.conversationCreate !== "boolean")) return NextResponse.json({ error: "Invalid conversation identity", status: 400 }, { status: 400 });
   const inputMessages = (body.messages ?? []).filter((message) => message.content?.trim());
@@ -457,6 +471,9 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
       return "";
     }
   })();
+  const effectiveVoiceIdPromise = streamAudio
+    ? resolveElevenLabsVoiceId(body.voiceId)
+    : Promise.resolve("");
   // Always load the scene catalog for chat turns, even when JEV is
   // disabled/unconfigured. The deterministic label match in chat-decision
   // needs the labels to switch by name ("คฤหาสน์") without JEV.
@@ -481,7 +498,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   const queryEmbeddingPromise = plan.retrieveMemory && geminiApiKey && lastUserText
     ? embedQuery(lastUserText)
     : Promise.resolve(undefined as number[] | undefined);
-  const [memoriesRes, state, toolResults, customInstructions] = await Promise.all([
+  const [memoriesRes, state, toolResults, customInstructions, effectiveVoiceId] = await Promise.all([
     // 1. Memories
     (async () => {
       if (!plan.retrieveMemory) return [];
@@ -510,6 +527,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     // 3. Local tools (weather / search) — run for vision requests too when shouldSearch is set
     runTools(lastUserText, [], shouldSearch, plan.localTools),
     customInstructionsPromise,
+    effectiveVoiceIdPromise,
   ]);
 
   const memories = memoriesRes;
@@ -609,6 +627,30 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   let providerStarted = 0;
   const observeToken = (provider: string) => firstToken ? () => firstToken(provider, { preparationMs: providerStarted - requestStarted, providerMs: Date.now() - providerStarted }) : undefined;
 
+  const baseTurnId = typeof body.turnId === "string" && body.turnId.trim()
+    ? body.turnId.trim().slice(0, 64)
+    : crypto.randomUUID();
+  let attemptCounter = 0;
+  let activeTtsSession: StreamingTtsSession | null = null;
+  let sawDeltaForActiveAttempt = false;
+  const startTtsAttempt = () => {
+    if (!streamAudio || !elevenLabsKey || !effectiveVoiceId || !streamControl) return null;
+    sawDeltaForActiveAttempt = false;
+    return new StreamingTtsSession({
+      apiKey: elevenLabsKey,
+      voiceId: effectiveVoiceId,
+      language,
+      turnId: `${baseTurnId}:${attemptCounter++}`,
+      signal: request.signal,
+      emit: streamControl.emit,
+    });
+  };
+  const abortTtsAttempt = (session: StreamingTtsSession | null) => {
+    if (!session) return;
+    session.abort(true);
+    if (activeTtsSession === session) activeTtsSession = null;
+  };
+
   // Vision route: Groq Qwen 3.8 27B only (GROQ_VISION_MODEL). No Gemini
   // fallback — if Qwen fails the request errors below instead of silently
   // switching providers.
@@ -622,6 +664,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
 
     // Groq vision (qwen/qwen3.8-27b supports image_url inputs).
     if (!generatedData && groqApiKey) {
+      let tts: StreamingTtsSession | null = null;
       try {
         // Await vision search in parallel with request build; it started above.
         const visionSearchResult = await visionSearchPromise;
@@ -634,14 +677,23 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
             ) ?? groqMessages[0].content }]
           : groqMessages;
         providerStarted = Date.now();
-        const res = await callGroq(groqApiKey, visionGroqMessages, groqVisionModel(), { timeoutMs: visionTimeoutMs, maxTokens: responseTokenLimit, firstToken: observeToken("groq") });
+        tts = startTtsAttempt();
+        activeTtsSession = tts;
+        const res = await callGroq(groqApiKey, visionGroqMessages, groqVisionModel(), {
+          timeoutMs: visionTimeoutMs,
+          maxTokens: responseTokenLimit,
+          firstToken: observeToken("groq"),
+          onDelta: tts ? (delta) => { sawDeltaForActiveAttempt = true; tts!.pushDelta(delta); } : undefined,
+        });
         if (res.ok) {
           generatedData = await res.json();
           provider = "groq";
         } else {
+          abortTtsAttempt(tts);
           console.warn(`Groq Vision (${groqVisionModel()}) returned ${res.status}`);
         }
       } catch (err) {
+        abortTtsAttempt(tts);
         console.warn(`Groq Vision (${groqVisionModel()}) network error`, err);
       }
     } else if (!groqApiKey) {
@@ -655,10 +707,14 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     const groqCandidates = [groqModelName()];
 
     for (const gModel of groqCandidates) {
+      let tts: StreamingTtsSession | null = null;
       try {
         const msgs = [{ role: "system" as const, content: systemPrompt }, ...promptContents];
         providerStarted = Date.now();
-        let initialRes = await callGroq(groqApiKey, msgs, gModel, { timeoutMs: primaryProviderTimeoutMs, maxTokens: responseTokenLimit, firstToken: observeToken("groq") });
+        tts = startTtsAttempt();
+        activeTtsSession = tts;
+        const onDelta = tts ? (delta: string) => { sawDeltaForActiveAttempt = true; tts!.pushDelta(delta); } : undefined;
+        let initialRes = await callGroq(groqApiKey, msgs, gModel, { timeoutMs: primaryProviderTimeoutMs, maxTokens: responseTokenLimit, firstToken: observeToken("groq"), onDelta });
         if (initialRes.status === 413) {
           // Log only the provider's short error metadata, never user prompts or API keys.
           const errorBody = await initialRes.clone().json().catch(() => null) as { error?: { message?: string; type?: string; code?: string } } | null;
@@ -674,6 +730,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
             timeoutMs: primaryProviderTimeoutMs,
             maxTokens: Math.min(responseTokenLimit, 1000),
             firstToken: observeToken("groq"),
+            onDelta,
           });
         }
         if (initialRes.ok) {
@@ -682,6 +739,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           provider = "groq";
           break;
         } else {
+          abortTtsAttempt(tts);
           console.warn(`Groq (${gModel}) returned ${initialRes.status}`, {
             mode: "chat",
             limitTokens: initialRes.headers.get("x-ratelimit-limit-tokens"),
@@ -694,6 +752,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
           });
         }
       } catch (err) {
+        abortTtsAttempt(tts);
         console.warn(`Groq (${gModel}) error`, err);
       }
     }
@@ -710,23 +769,33 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     ]));
 
     for (const model of geminiCandidates) {
+      let tts: StreamingTtsSession | null = null;
       try {
         const payload = shouldSearch ? { ...geminiPayload, tools: [{ google_search: {} }] } : geminiPayload;
         providerStarted = Date.now();
-        const res = await callGemini(geminiApiKey, payload, model, { timeoutMs: hasImage ? visionTimeoutMs : providerTimeoutMs, firstToken: observeToken("gemini") });
+        tts = startTtsAttempt();
+        activeTtsSession = tts;
+        const res = await callGemini(geminiApiKey, payload, model, {
+          timeoutMs: hasImage ? visionTimeoutMs : providerTimeoutMs,
+          firstToken: observeToken("gemini"),
+          onDelta: tts ? (delta) => { sawDeltaForActiveAttempt = true; tts!.pushDelta(delta); } : undefined,
+        });
         if (res.ok) {
           generatedData = await res.json();
           provider = "gemini";
           break;
         }
+        abortTtsAttempt(tts);
         console.warn(`Gemini (${model}) returned ${res.status}`);
       } catch (err) {
+        abortTtsAttempt(tts);
         console.warn(`Gemini (${model}) network error`, err);
       }
     }
   }
 
   if (!generatedData) {
+    abortTtsAttempt(activeTtsSession);
     console.error("All chat providers failed");
     return NextResponse.json({ error: "ผู้ให้บริการตอบช้าหรือไม่พร้อมใช้งาน ลองใหม่อีกครั้งนะคะ" }, { status: 504 });
   }
@@ -746,7 +815,10 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
   // 1,000-character dialogue budget.
   const replyText = limitReplyCharacters(generatedText, replyCharacterLimit);
   const text = removeEmoji(sources.length ? `${replyText}\n\nแหล่งข้อมูล:\n${sources.map((source: { title: string; uri: string }) => `- ${source.title}: ${source.uri}`).join("\n")}` : replyText);
-  if (!text) return NextResponse.json({ error: "Chat provider returned no text" }, { status: 502 });
+  if (!text) {
+    abortTtsAttempt(activeTtsSession);
+    return NextResponse.json({ error: "Chat provider returned no text" }, { status: 502 });
+  }
 
   const nextState = applyConversationTurn(state, lastUserText, text, false);
   nextState.conversationSummary = state.conversationSummary;
@@ -863,7 +935,7 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
       const effectiveScene: SceneDecision = plan.scene.change ? plan.scene : (replySceneId ? { change: true, id: replySceneId } : plan.scene);
       return executeSceneDecision(sceneContext, effectiveScene).catch(() => ({ change: false as const }));
     })();
-  return NextResponse.json({
+  const payload = {
     scene,
     text,
     historySaved,
@@ -871,5 +943,14 @@ async function chatReply(request: Request, authenticatedUserId: string | null, r
     tools: toolResults.map((item) => item.name),
     companion: nextState,
     memories,
-  });
+  };
+  const finalTtsSession: StreamingTtsSession | null = activeTtsSession;
+  if (finalTtsSession && streamControl) {
+    streamControl.emitReply(200, payload);
+    if (!sawDeltaForActiveAttempt && replyText) {
+      finalTtsSession.pushDelta(replyText);
+    }
+    await finalTtsSession.finish().catch(() => {});
+  }
+  return NextResponse.json(payload);
 }
