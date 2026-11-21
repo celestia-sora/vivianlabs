@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fishSpeechText, limitReplyCharacters, replyCharacterLimit, speechEmotionTag, speechSpeed, speechStyle, speechText, visibleReplyLength } from "../lib/speech.ts";
+import { fishSpeechText, limitReplyCharacters, replyCharacterLimit, speechEmotionTag, speechSpeed, speechStyle, speechText, speechTextWithAudioTags, visibleReplyLength } from "../lib/speech.ts";
 
 test("spoken replies omit stage directions and sources but retain dialogue and explanations", () => {
   assert.equal(speechText("(หลบตา) ไม่ได้รอหรอก... **Vivian** อ่าน [เรื่องนี้](https://example.com) (เวอร์ชัน 2)\nแหล่งข้อมูล:\n- https://example.com"), "ไม่ได้รอหรอก… Vivian อ่าน เรื่องนี้ (เวอร์ชัน สอง)");
@@ -151,4 +151,19 @@ test("replies are capped at 1,000 visible characters without breaking audio tags
   const edge = limitReplyCharacters(tagNearEdge);
   assert.equal((edge.match(/\[/gu) ?? []).length, (edge.match(/\]/gu) ?? []).length);
   assert.ok(visibleReplyLength(edge) <= 1000);
+});
+
+
+test("Thai chat laughter becomes an ElevenLabs audio tag only in TTS text", () => {
+  for (const input of ["55555", "555 เธอนี่ตลกจริง ๆ", "ฮ่าๆๆ เธอนี่ตลกจริง ๆ"]) {
+    assert.match(speechTextWithAudioTags(input, "th"), /^\\[laughs\\]/u, input);
+  }
+  assert.equal(speechTextWithAudioTags("55555", "th"), "[laughs]");
+  assert.equal(speechTextWithAudioTags("5555 บาท", "th"), "ห้าพันห้าร้อยห้าสิบห้าบาท");
+  assert.equal(speechTextWithAudioTags("เบอร์ 555", "th"), "เบอร์ ห้า ห้า ห้า");
+  assert.equal(speechTextWithAudioTags("ราคา 555 บาท", "th"), "ราคา ห้าร้อยห้าสิบห้าบาท");
+  assert.equal(speechText("55555", "th"), "ห้าหมื่นห้าพันห้าร้อยห้าสิบห้า");
+  assert.equal(speechText("555 เธอนี่ตลกจริง ๆ", "th"), "ห้าร้อยห้าสิบห้า เธอนี่ตลกจริง ๆ");
+  assert.equal(speechTextWithAudioTags("[playful] 55555 ไม่ได้ขำนะ", "th"), "[playful] [laughs] ไม่ได้ขำนะ");
+  assert.equal(speechTextWithAudioTags("5 บาท", "th"), "ห้าบาท");
 });
