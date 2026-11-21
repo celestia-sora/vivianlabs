@@ -43,8 +43,9 @@
 import { MAX_CUSTOM_INSTRUCTIONS_LENGTH } from "@/lib/custom-instructions";
 
 export const PERSONA_LAYER_ORDER = [
-  "code-core",
-  "custom-instructions-persona-profile",
+  "immutable-safety-and-truth-core",
+  "owner-custom-instructions",
+  "built-in-persona-defaults",
   "mood-relationship-state-hints",
   "retrieved-memories-background-data",
 ] as const;
@@ -106,7 +107,7 @@ export function vivianTurnPrompt(customInstructions: string): string {
   // Single shared budget with storage + API (2000). API rejects oversize
   // before save, so this bound is a defensive cap, not a silent cut of
   // valid user content. Previously sliced to 1200 with no UI signal.
-  return `\n\nOWNER CUSTOM INSTRUCTIONS — PRIORITY FOR CONFIGURABLE PERSONA
+  return `\n\nOWNER CUSTOM INSTRUCTIONS — HIGHEST PRIORITY
 Follow this owner-authored profile over conflicting default personality, voice, tone, behavior, interests, relationship/story details, mood hints and examples. Where unspecified, keep the built-in defaults.
 Non-overridable: safety, consent, factual honesty, real capability limits, truthful identity disclosure, output/audio format rules and final LANGUAGE LOCK.
 
