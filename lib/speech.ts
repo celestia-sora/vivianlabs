@@ -155,8 +155,8 @@ function prepareSpeechText(value: string, language: string, preserveAudioTags: b
   const spoken = language === "th" || (language === "global" && /[ก-๙]/u.test(cleaned)) ? thaiSpeechNumbers(cleaned) : cleaned;
   if (!preserveAudioTags) return spoken;
   return spoken
-    .replace(/\uE000L([\\uE100-\\uF8FF])\uE001/gu, (_match, index: string) => laughterTokens[index.charCodeAt(0) - 0xE100] ?? "")
-    .replace(/\uE000M([\\uE100-\\uF8FF])\uE001/gu, (_match, index: string) => tags[index.charCodeAt(0) - 0xE100] ?? "");
+    .replace(/\uE000L([\uE100-\uF8FF])\uE001/gu, (_match, index: string) => laughterTokens[index.charCodeAt(0) - 0xE100] ?? "")
+    .replace(/\uE000M([\uE100-\uF8FF])\uE001/gu, (_match, index: string) => tags[index.charCodeAt(0) - 0xE100] ?? "");
 }
 
 export function speechText(value: string, language = "global"): string {
