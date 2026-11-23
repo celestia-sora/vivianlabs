@@ -1,5 +1,10 @@
-import { requireApiAccess } from "@/lib/auth/server";
+import { requireAuthorizedUser } from "@/lib/auth/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import {
+  getVoicePreferences,
+  saveVoicePreferences,
+  type ElevenLabsLanguageCode,
+} from "@/lib/elevenlabs-voice";
 import {
   DEFAULT_VOICE_ID,
   DEFAULT_SPEECH_LANGUAGE,
@@ -7,16 +12,14 @@ import {
 } from "@/lib/voice-preferences";
 
 const headers = { "Cache-Control": "private, no-store" };
-const columns = "voice_id,speech_language,speaking_speed";
-const columnsFallback = "speech_language,speaking_speed";
 
 export async function preferences(request: Request, write: boolean): Promise<Response> {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
 
   const defaultEnvVoiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
   let voiceId: string | undefined;
-  let language: string | undefined;
+  let language: ElevenLabsLanguageCode | undefined;
 
   if (write) {
     let body: unknown;
@@ -32,50 +35,16 @@ export async function preferences(request: Request, write: boolean): Promise<Res
       return Response.json({ error: "Provide a valid voiceId (string) or speechLanguage" }, { status: 400, headers });
     }
     if (hasVoice) voiceId = (record.voiceId as string).trim();
-    if (hasLang) language = record.speechLanguage as string;
+    if (hasLang) language = record.speechLanguage as ElevenLabsLanguageCode;
   }
 
   try {
     const db = getSupabaseAdmin(AbortSignal.timeout(8000));
-    // One fixed singleton for all authorized accounts; global settings
-    const row: Record<string, unknown> = {
-      id: "global",
-      ...(voiceId === undefined ? {} : { voice_id: voiceId }),
-      ...(language === undefined ? {} : { speech_language: language }),
-      updated_at: new Date().toISOString(),
-    };
+    const prefs = write
+      ? await saveVoicePreferences(db, user.id, { voiceId, speechLanguage: language }, defaultEnvVoiceId)
+      : await getVoicePreferences(db, user.id, defaultEnvVoiceId);
 
-    let result = write
-      ? await db.from("vivian_voice_preferences").upsert(row, { onConflict: "id" }).select(columns).single()
-      : await db.from("vivian_voice_preferences").select(columns).eq("id", "global").maybeSingle();
-
-    // Gracefully handle if voice_id column doesn't exist yet in Supabase schema
-    if (result.error && /voice_id/i.test(result.error.message)) {
-      const fallbackRow = { ...row };
-      delete fallbackRow.voice_id;
-      result = write
-        ? await db.from("vivian_voice_preferences").upsert(fallbackRow, { onConflict: "id" }).select(columnsFallback).single()
-        : await db.from("vivian_voice_preferences").select(columnsFallback).eq("id", "global").maybeSingle();
-    }
-
-    const savedVoiceId = typeof result.data?.voice_id === "string" && result.data.voice_id
-      ? result.data.voice_id
-      : (voiceId ?? defaultEnvVoiceId);
-
-    const savedLang = validSpeechLanguage(result.data?.speech_language)
-      ? result.data.speech_language
-      : (language ?? DEFAULT_SPEECH_LANGUAGE);
-
-    const savedSpeed = typeof result.data?.speaking_speed === "number"
-      ? result.data.speaking_speed
-      : undefined;
-
-    return Response.json({
-      voiceId: savedVoiceId,
-      defaultVoiceId: defaultEnvVoiceId,
-      speechLanguage: savedLang,
-      ...(savedSpeed !== undefined ? { speakingSpeed: savedSpeed } : {}),
-    }, { headers });
+    return Response.json(prefs, { headers });
   } catch {
     if (write) {
       return Response.json({ error: "Could not reach database" }, { status: 503, headers });

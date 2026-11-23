@@ -1,14 +1,13 @@
-import { requireApiAccess } from "@/lib/auth/server";
+import { requireAuthorizedUser } from "@/lib/auth/server";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { defaultCompanionState } from "@/lib/companion";
 import { resetCompanionData } from "@/lib/reset-companion";
 
-const userKey = "default";
-
 export async function GET(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
+  const userKey = user.id;
   try {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.from("memories").select("id,memory,category,importance,updated_at,last_used_at,use_count").eq("user_key", userKey).order("importance", { ascending: false }).order("updated_at", { ascending: false }).limit(30);
@@ -28,8 +27,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
+  const userKey = user.id;
   try {
     const body = (await request.json()) as { memory?: string; category?: string; importance?: number };
     const memory = body.memory?.trim();
@@ -45,8 +45,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
+  const userKey = user.id;
   try {
     const body = (await request.json()) as { id?: number; memory?: string; category?: string; importance?: number };
     const memory = body.memory?.trim();
@@ -62,8 +63,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
+  const userKey = user.id;
   try {
     const body = (await request.json()) as { scope?: "conversation" | "memory" | "all"; id?: number };
     const supabase = getSupabaseAdmin();

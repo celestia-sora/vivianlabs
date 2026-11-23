@@ -1,6 +1,7 @@
-import { requireApiAccess } from "@/lib/auth/server";
+import { requireAuthorizedUser } from "@/lib/auth/server";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { loadMemorySummary, saveMemorySummary } from "@/lib/companion-store";
 import { memoryConsolidationEnabled } from "@/lib/memory-v2";
 import { runConsolidation } from "@/lib/memory-consolidation";
 
@@ -19,17 +20,12 @@ const MEMORY_SUMMARY_SYSTEM_PROMPT =
 
 /** GET — ดึง memory_summary จาก companion_state */
 export async function GET(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
   try {
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
-      .from("companion_state")
-      .select("memory_summary")
-      .eq("user_key", "default")
-      .maybeSingle();
-    if (error) throw error;
-    return NextResponse.json({ summary: data?.memory_summary ?? "" });
+    const summary = await loadMemorySummary(user.id, supabase);
+    return NextResponse.json({ summary });
   } catch {
     return NextResponse.json({ summary: "" }, { status: 503 });
   }
@@ -41,7 +37,7 @@ export async function GET(request: Request) {
  *   - no body / other body → generate a fresh memory_summary via Groq and store it
  */
 export async function POST(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
 
   // Parse body to determine mode (body may be empty)
@@ -60,7 +56,7 @@ export async function POST(request: Request) {
     }
     try {
       const supabase = getSupabaseAdmin();
-      const stats = await runConsolidation(supabase);
+      const stats = await runConsolidation(supabase, user.id);
       if (!stats.ok && stats.reason === "lease-held") {
         return NextResponse.json({ ok: false, running: true }, { status: 409 });
       }
@@ -84,7 +80,7 @@ export async function POST(request: Request) {
     const { data: memories, error: memErr } = await supabase
       .from("memories")
       .select("memory, category, importance")
-      .eq("user_key", "default")
+      .eq("user_key", user.id)
       .is("superseded_by", null)
       .order("importance", { ascending: false });
 
@@ -126,10 +122,7 @@ export async function POST(request: Request) {
     const summary = (data.choices?.[0]?.message?.content ?? "").trim().slice(0, 2000);
 
     // Persist to companion_state
-    await supabase.from("companion_state").upsert(
-      { user_key: "default", memory_summary: summary, updated_at: new Date().toISOString() },
-      { onConflict: "user_key" }
-    );
+    await saveMemorySummary(user.id, summary, supabase);
 
     return NextResponse.json({ summary });
   } catch (err) {
@@ -140,15 +133,24 @@ export async function POST(request: Request) {
 
 /** PATCH — บันทึก summary ที่ user แก้ไขแล้ว */
 export async function PATCH(request: Request) {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
-  const body = await request.json();
-  const summary = typeof body?.summary === "string" ? body.summary.trim().slice(0, 2000) : null;
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const summary =
+    body && typeof body === "object" && !Array.isArray(body) && typeof (body as Record<string, unknown>).summary === "string"
+      ? ((body as Record<string, unknown>).summary as string).trim().slice(0, 2000)
+      : null;
   if (summary === null) return NextResponse.json({ error: "Invalid summary" }, { status: 400 });
-  const supabase = getSupabaseAdmin();
-  await supabase.from("companion_state").upsert(
-    { user_key: "default", memory_summary: summary, updated_at: new Date().toISOString() },
-    { onConflict: "user_key" }
-  );
-  return NextResponse.json({ summary });
+  try {
+    const supabase = getSupabaseAdmin();
+    await saveMemorySummary(user.id, summary, supabase);
+    return NextResponse.json({ summary });
+  } catch {
+    return NextResponse.json({ error: "Memory summary unavailable" }, { status: 503 });
+  }
 }

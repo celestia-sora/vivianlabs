@@ -4,11 +4,14 @@ import { saveCloudModelPreference } from "@/lib/cloud-store";
 export const runtime = "nodejs";
 
 export async function PATCH(request: Request) {
-  return cloudApi(request, async (db, userId) => {
+  return cloudApi(request, async (db, userId, tier) => {
+    if (tier === "free") {
+      return Response.json({ preference: await saveCloudModelPreference(db, userId, undefined, { tier }) });
+    }
     let body: unknown;
     try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON", status: 400 }, { status: 400 }); }
     const modelId = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).modelId : undefined;
-    const preference = await saveCloudModelPreference(db, userId, modelId);
+    const preference = await saveCloudModelPreference(db, userId, modelId, { tier });
     return Response.json({ preference });
   });
 }

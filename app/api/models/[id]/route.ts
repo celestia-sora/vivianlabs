@@ -4,14 +4,20 @@ import { StorageError } from "@/lib/cloud-storage";
 export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 export async function GET(request: Request, context: Context) {
-  return cloudApi(request, async (db, userId) => Response.json(await cloudModelDownload(db, userId, (await context.params).id)));
+  return cloudApi(request, async (db, userId, tier) => Response.json(await cloudModelDownload(db, userId, (await context.params).id, { tier })));
 }
 export async function POST(request: Request, context: Context) {
-  return cloudApi(request, async (db, userId) => Response.json(await finishCloudModel(db, userId, (await context.params).id)));
+  return cloudApi(request, async (db, userId, tier) => {
+    const res = await finishCloudModel(db, userId, (await context.params).id, { tier });
+    return Response.json({
+      ...res,
+      usage: tier === "sorachan" ? res.usage : null,
+    });
+  });
 }
 export async function DELETE(request: Request, context: Context) {
-  return cloudApi(request, async (db, userId) => {
-    try { await removeCloudModel(db, userId, (await context.params).id); }
+  return cloudApi(request, async (db, userId, tier) => {
+    try { await removeCloudModel(db, userId, (await context.params).id, { tier }); }
     catch (error) { if (!(error instanceof StorageError) || error.status !== 404) throw error; }
     return Response.json({ deleted: true });
   });
