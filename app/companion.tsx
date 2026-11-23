@@ -19,7 +19,7 @@ import { subscribeModelLibrary } from "@/lib/model-library-realtime";
 import { useConversationHistory } from "@/lib/use-conversation-history";
 import { historyMessage, HISTORY_CACHE_KEY, type HistoryMessage, type HistoryConversation } from "@/lib/chat-history";
 import { deleteCloudHistory } from "@/lib/chat-history-client";
-import { authFetch } from "@/lib/auth/fetch";
+import { authFetch, getAuthToken } from "@/lib/auth/fetch";
 import { speechText } from "@/lib/speech";
 import { hapticFeedback, hapticPatterns } from "@/lib/haptics";
 import { decayCompanionState, type CompanionState, defaultCompanionState, normalizeMood, moodLabel, type Mood } from "@/lib/companion";
@@ -27,7 +27,7 @@ import { detectLive2DEmotion, resolveLive2DExpression, resolveLive2DMotion } fro
 import { createExpressionStack, loadExpressionParameterSets, SAVED_EXPRESSION_STACK_FILE, SAVED_EXPRESSION_STACK_NAME } from "@/lib/live2d-expression-stack";
 import { MODEL_CONFIG, type ModelKey } from "@/lib/models";
 import { createModelResources, importModelFiles, loadModelCatalog, hydrateModelPackage, modelCatalogEntry, readModelSelection, resolveStartupModel, writeModelSelection, removeModelPackage, saveModelPackage, type ModelPackage, type ModelMotion } from "@/lib/local-models";
-import { getCloudModels, cloudModelPlaceholder, uploadCloudModel, downloadCloudModel, deleteCloudModel, saveCloudModelPreference, saveCloudModelExpressions, type CloudLibrary } from "@/lib/cloud-models";
+import { CloudModelError, getCloudModels, cloudModelPlaceholder, isCloudLibraryAllowed, uploadCloudModel, downloadCloudModel, deleteCloudModel, saveCloudModelPreference, saveCloudModelExpressions, type CloudLibrary } from "@/lib/cloud-models";
 import { useVoicePreferences } from "@/lib/use-voice-preferences";
 import { useCustomInstructions } from "@/lib/use-custom-instructions";
 import type { SpeechLanguage } from "@/lib/voice-preferences";
@@ -35,6 +35,20 @@ import { useSceneLibrary } from "@/lib/use-scene-library";
 import { SceneManager } from "@/app/components/scene-manager";
 import { SceneBackground } from "@/app/components/scene-background";
 import { StorageStatusPanel } from "@/app/components/storage-status";
+import {
+  CLOUD_TIER_REQUIRED_MESSAGE,
+  LimitReachedModal,
+  RequestSelectedModal,
+  SorachanAdminPanel,
+  TierMenuSummary,
+  TierSettingsCard,
+  formatPersonalMb,
+  isQuotaDepleted,
+  vivianQuotaExceededReply,
+  type AccountChatQuota,
+  type AccountSummary,
+  type TierKey,
+} from "@/app/components/tier-panel";
 import { createVoiceActivity, updateVoiceActivity, type VoiceActivityState } from "@/lib/voice-activity";
 import type { SceneDecision } from "@/lib/scenes";
 import { useMotionValue } from "motion/react";
@@ -124,7 +138,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T) {
   ]).finally(() => { if (timer) window.clearTimeout(timer); });
 }
 
-export default function Companion({ accountEmail, accountId }: { accountEmail: string; accountId: string }) {
+export default function Companion({ accountEmail: initialAccountEmail, accountId: initialAccountId }: { accountEmail: string; accountId: string }) {
+  const [accountEmail, setAccountEmail] = useState(initialAccountEmail);
+  const [accountId, setAccountId] = useState(initialAccountId);
+  const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const accountRef = useRef<AccountSummary | null>(null);
+  accountRef.current = account;
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [limitModalOpen, setLimitModalOpen] = useState(false);
+
   // Sign-in gate (Cloudflare flow): the bearer token lives in localStorage
   // (vivian_auth_token). Consume `#token=...` first, then enforce login.
   useEffect(() => {
@@ -141,6 +164,59 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     } catch {
       // Storage unavailable — let the API 401s drive the flow
     }
+  }, []);
+
+  const sceneLibraryRef = useRef<{ refresh: () => Promise<void> } | null>(null);
+
+  async function refreshAccount(signal?: AbortSignal) {
+    let hasToken = false;
+    try {
+      hasToken = Boolean(getAuthToken());
+    } catch {
+      hasToken = false;
+    }
+    if (!hasToken) return;
+    setAccountLoading(true);
+    try {
+      const response = await authFetch("/api/account", {
+        cache: "no-store",
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12_000)]) : AbortSignal.timeout(12_000),
+      });
+      if (!response.ok) return;
+      const data = await response.json() as AccountSummary;
+      if (signal?.aborted) return;
+      const previousTier = accountRef.current?.tier;
+      setAccount(data);
+      if (data.user?.email) setAccountEmail(data.user.email);
+      if (data.user?.id) setAccountId(data.user.id);
+      if (previousTier === "free" && data.tier !== "free") {
+        void getCloudModels(signal).then(setCloudLibrary).catch(() => {});
+        void sceneLibraryRef.current?.refresh().catch(() => {});
+      }
+    } catch {
+      // Companion remains usable on cached/local state if /api/account is temporarily unavailable.
+    } finally {
+      if (!signal?.aborted) setAccountLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const initial = window.setTimeout(() => {
+      void refreshAccount(controller.signal);
+    }, 0);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshAccount(controller.signal);
+    };
+    const onFocus = () => { void refreshAccount(controller.signal); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(initial);
+      controller.abort();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -384,6 +460,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   const [memoryDraft, setMemoryDraft] = useState("");
   const [backgroundMode, setBackgroundMode] = useState<keyof typeof BACKGROUNDS>("day");
   const sceneLibrary = useSceneLibrary(PRESET_SCENE_IMAGES, accountId, backgroundReady);
+  sceneLibraryRef.current = sceneLibrary;
   const activeCustomSceneId = sceneLibrary.preferences.activeSceneId;
   const selectedPreset = sceneLibrary.preferences.preset ?? backgroundMode;
   const { voiceId, language: speechLanguage, saveVoiceId, saveLanguage, notice: voiceNotice, refresh: refreshVoicePreferences } = useVoicePreferences();
@@ -541,6 +618,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
           const cloud = await getCloudModels(AbortSignal.timeout(12_000)).catch(() => null);
           if (!cloud || disposed) return;
           setCloudLibrary(cloud);
+          if (cloud.cloudAllowed === false) return;
           setModelPackages((current) => {
             const sharedIds = new Set(cloud.models.filter((model) => model.scope === "shared").map((model) => model.id));
             const merged = current.filter((pack) => !pack.cloudOwner || pack.models.some((model) => model.id === activeModelIdRef.current) || cloud.models.some((model) => model.id === pack.id))
@@ -715,12 +793,18 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       setModelPackages((current) => [...current.map(modelCatalogEntry), pack]);
       setActiveModelId(pack.models[0].id);
       void navigator.storage?.persist?.().catch(() => {});
-      if (cloudLibrary) {
+      if (isCloudLibraryAllowed(cloudLibrary) && accountRef.current?.capabilities.canUseCloudModels !== false) {
         setModelImportProgress({ label: "Preparing private cloud copy…", percent: null });
         await syncModelToCloud(pack, importingZip ? files[0] : undefined);
       }
     } catch (error) {
-      setModelNotice(error instanceof Error ? error.message : "Could not import this model.");
+      if (error instanceof CloudModelError && error.code === "STORAGE_QUOTA_EXCEEDED") {
+        setModelNotice("บันทึกไว้บนเครื่องแล้ว แต่พื้นที่ Cloud R2 ส่วนตัวเต็ม (512 MB) — ลบไฟล์เก่าใน Cloud ก่อนอัปโหลดเพิ่มนะคะ");
+      } else if (error instanceof CloudModelError && error.code === "TIER_REQUIRED") {
+        setModelNotice(CLOUD_TIER_REQUIRED_MESSAGE);
+      } else {
+        setModelNotice(error instanceof Error ? error.message : "Could not import this model.");
+      }
     } finally {
       setModelImporting(false);
       setModelImportProgress(null);
@@ -739,17 +823,29 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     const selectedId = saved.pack.models.find((model) => model.manifestPath === activeModel?.manifestPath)?.id ?? saved.pack.models[0].id;
     setActiveModelId(selectedId);
     void saveCloudModelPreference(selectedId).catch(() => {});
-    setCloudLibrary((current) => current ? { ...current, usage: saved.usage, models: [...current.models, { id: saved.pack.id, byteSize: 0, manifests: saved.pack.models.map((model) => ({ path: model.manifestPath, name: model.name })) }] } : current);
+    setCloudLibrary((current) => current ? {
+      ...current,
+      usage: saved.usage ?? current.usage,
+      personalUsage: saved.personalUsage ?? current.personalUsage,
+      models: [...current.models, { id: saved.pack.id, byteSize: saved.byteSize, scope: saved.scope, manifests: saved.pack.models.map((model) => ({ path: model.manifestPath, name: model.name })) }],
+    } : current);
     await removeModelPackage(pack.id).catch(() => {});
+    void refreshAccount();
     setModelNotice("Model saved privately to cloud.");
   }
 
   async function saveActiveModelToCloud() {
-    if (!activePackage || modelImporting || !cloudLibrary) return;
+    if (!activePackage || modelImporting || !isCloudLibraryAllowed(cloudLibrary) || accountRef.current?.capabilities.canUseCloudModels === false) return;
     setModelImporting(true);
     setModelImportProgress({ label: "Preparing private cloud copy…", percent: null });
     try { await syncModelToCloud(activePackage); }
-    catch (error) { setModelNotice(error instanceof Error ? error.message : "Could not save model to cloud."); }
+    catch (error) {
+      if (error instanceof CloudModelError && error.code === "TIER_REQUIRED") {
+        setModelNotice(CLOUD_TIER_REQUIRED_MESSAGE);
+      } else {
+        setModelNotice(error instanceof Error ? error.message : "Could not save model to cloud.");
+      }
+    }
     finally { setModelImporting(false); setModelImportProgress(null); }
   }
 
@@ -778,7 +874,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       setModelPackages((current) => current.map((entry) => entry.id === pack.id ? downloaded : modelCatalogEntry(entry)));
       setActiveModelId(id);
       writeModelSelection(localStorage, id);
-      if (cloudLibrary?.models.some((model) => model.id === pack.id)) void saveCloudModelPreference(id).catch(() => {});
+      if (cloudLibrary?.cloudAllowed !== false && cloudLibrary?.models.some((model) => model.id === pack.id)) void saveCloudModelPreference(id).catch(() => {});
       setModelNotice(null);
       setModelPaused(false);
       setModelReload((value) => value + 1);
@@ -797,10 +893,11 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     stopBackgroundPreload();
     setModelImporting(true);
     try {
-      if (cloudLibrary?.models.some((model) => model.id === activePackage.id)) {
+      if (cloudLibrary?.cloudAllowed !== false && cloudLibrary?.models.some((model) => model.id === activePackage.id)) {
         await deleteCloudModel(activePackage.id);
         setCloudLibrary((current) => current ? { ...current, models: current.models.filter((model) => model.id !== activePackage.id) } : current);
         void getCloudModels().then(setCloudLibrary).catch(() => {});
+        void refreshAccount();
       }
       await removeModelPackage(activePackage.id);
       releaseModelPreviews(activePackage.id);
@@ -835,7 +932,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
     try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Cloud preference remains available when configured. */ }
     setModelReload((value) => value + 1);
 
-    if (!cloudLibraryRef.current?.models.some((model) => model.id === activePackage.id)) return;
+    if (!cloudLibraryRef.current || cloudLibraryRef.current.cloudAllowed === false || !cloudLibraryRef.current.models.some((model) => model.id === activePackage.id)) return;
     const saveVersion = (expressionSaveVersionsRef.current.get(key) ?? 0) + 1;
     expressionSaveVersionsRef.current.set(key, saveVersion);
     const previousSave = expressionSaveQueuesRef.current.get(key) ?? Promise.resolve();
@@ -889,11 +986,17 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
   }
 
   useEffect(() => {
-    if (!sidebarOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { setPanel(null); setSidebarOpen(false); } };
+    if (!sidebarOpen && !requestModalOpen && !limitModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (requestModalOpen) { setRequestModalOpen(false); return; }
+      if (limitModalOpen) { setLimitModalOpen(false); return; }
+      setPanel(null);
+      setSidebarOpen(false);
+    };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sidebarOpen]);
+  }, [sidebarOpen, requestModalOpen, limitModalOpen]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1795,6 +1898,35 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       if (ttsAbortRef.current === abort) ttsAbortRef.current = null;
     }
   }
+  function handleChatQuotaReached(
+    tier: TierKey,
+    nextQuota?: AccountChatQuota,
+    unsentText?: string,
+    restoreDraft = false,
+    removeUserMessageId?: string,
+  ) {
+    if (nextQuota) {
+      setAccount((prev) => (prev ? { ...prev, chatQuota: nextQuota } : prev));
+    } else {
+      setAccount((prev) =>
+        prev
+          ? { ...prev, chatQuota: { ...prev.chatQuota, allowed: false, remaining: 0 } }
+          : prev,
+      );
+    }
+    setErrorNotice(null);
+    resetReaction();
+    const vivianReply = vivianQuotaExceededReply(tier);
+    setMessages((current) => [
+      ...(removeUserMessageId ? current.filter((item) => item.id !== removeUserMessageId) : current),
+      historyMessage("vivian", vivianReply),
+    ]);
+    if (restoreDraft && unsentText) {
+      setMessage(unsentText);
+    }
+    setLimitModalOpen(true);
+    void playReaction(vivianReply, unsentText ?? "", false);
+  }
   async function sendMessage(overrideText?: string, options: { image?: string } = {}) {
     const text = (overrideText ?? message).trim();
     let imageToSend = options.image ?? attachedImage;
@@ -1812,12 +1944,18 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       markActivity();
       return;
     }
+    const currentAccount = accountRef.current;
+    if (currentAccount && currentAccount.tier !== "sorachan" && isQuotaDepleted(currentAccount.chatQuota)) {
+      handleChatQuotaReached(currentAccount.tier, currentAccount.chatQuota, text, overrideText === undefined);
+      return;
+    }
     if (speakingRef.current) stopSpeech();
     userInterruptedRef.current = false;
     markActivity();
     interactedRef.current = true;
     const displayText = text || (imageToSend ? "[ส่งรูปภาพ]" : "");
-    const nextMessages = [...messagesRef.current, historyMessage("me", displayText)];
+    const userMessage = historyMessage("me", displayText);
+    const nextMessages = [...messagesRef.current, userMessage];
     setMessages(nextMessages);
     setMessage("");
     setAttachedImage(null);
@@ -1846,7 +1984,17 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
       streamer.startTurn(turnId, audioContextRef.current as unknown as AudioContextLike | null);
     }
 
-    type ChatPayload = { scene?: SceneDecision; text?: string; error?: string; code?: string; memories?: Memory[]; companion?: CompanionState };
+    type ChatPayload = {
+      scene?: SceneDecision;
+      text?: string;
+      error?: string;
+      code?: string;
+      requiredTier?: TierKey;
+      quota?: AccountChatQuota;
+      chatQuota?: AccountChatQuota;
+      memories?: Memory[];
+      companion?: CompanionState;
+    };
     let resolveReply!: (value: { data: ChatPayload; ok: boolean }) => void;
     let rejectReply!: (reason: unknown) => void;
     let replySettled = false;
@@ -1865,7 +2013,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
           conversationId: requestConversationId,
           conversationCreate: !history.isCloudConversation(requestConversationId),
           conversationTitle: conversations.find((item) => item.id === requestConversationId)?.title ?? (text.slice(0, 42) || "Daily Talk"),
-          userMessageId: nextMessages.filter((item) => item.from === "me").at(-1)?.id,
+          userMessageId: userMessage.id,
           assistantMessageId: replyMessageId,
           messages: nextMessages.map((item) => ({ role: item.from === "me" ? "user" : "assistant", content: item.text })),
           image: imageToSend ?? undefined,
@@ -1934,7 +2082,23 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
 
       const { data, ok } = await replyPromise;
       finishTiming(replyTiming);
+      if (!ok && data?.code === "QUOTA_EXCEEDED") {
+        if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
+        if (chatStreamAbortRef.current === chatAbort) chatStreamAbortRef.current = null;
+        streamer?.interrupt();
+        cancelTiming(firstTokenTiming);
+        const serverQuota = data.quota ?? data.chatQuota;
+        const effectiveTier = serverQuota?.tier ?? accountRef.current?.tier ?? "free";
+        handleChatQuotaReached(effectiveTier, serverQuota, text, overrideText === undefined, userMessage.id);
+        return;
+      }
       if (!ok || !data?.text) throw new Error(data?.code ?? data?.error ?? "Chat request failed");
+      const updatedQuota = data.chatQuota ?? data.quota;
+      if (updatedQuota) {
+        setAccount((prev) => (prev ? { ...prev, chatQuota: updatedQuota } : prev));
+      } else if (!accountRef.current) {
+        void refreshAccount();
+      }
       sceneLibrary.applyChatScene(data.scene, sceneGeneration);
       const reply = data.text;
       setErrorNotice(null);
@@ -1980,6 +2144,10 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
         return;
       }
       streamer?.interrupt();
+      if (error instanceof Error && error.message === "QUOTA_EXCEEDED") {
+        handleChatQuotaReached(accountRef.current?.tier ?? "free", undefined, text, overrideText === undefined, userMessage.id);
+        return;
+      }
       console.error("Vivian response unavailable", error);
       resetReaction();
       const message = error instanceof Error && error.message.includes("RATE_LIMITED") ? "หยุดส่งข้อความ รอให้ระบบพร้อมก่อน"
@@ -2723,6 +2891,12 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
           {modelImporting && panel === "character" && <div className={`floating-panel-loadbar${typeof displayedImportPercent === "number" ? " is-determinate" : " is-indeterminate"}`} aria-hidden="true"><span style={typeof displayedImportPercent === "number" ? { width: `${displayedImportPercent}%` } : undefined} /></div>}
           <div className="floating-panel-body">
             {!panel && <>
+              <TierMenuSummary
+                account={account}
+                accountEmail={accountEmail}
+                loading={accountLoading}
+                onOpenRequest={() => setRequestModalOpen(true)}
+              />
               <button type="button" className="floating-new-chat" onClick={newConversation}><Icon name="plus" size={17}/> New Chat</button>
               <div className="floating-menu-list">{navigation.map((item) => <button key={item.key} type="button" className="floating-nav-item" onClick={() => openPanel(item.key)}><Icon name={item.icon} size={18}/><span>{item.label}</span><span className="nav-chevron"><Icon name="chevron" size={16}/></span></button>)}</div>
             </>}
@@ -2820,10 +2994,56 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
                   <button className="floating-option" type="button" disabled={modelImporting || !modelsReady} onClick={() => modelFolderRef.current?.click()}>Choose an unpacked folder instead</button>
                 </div>
                 <input ref={modelFolderRef} hidden type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={(event) => { const input = event.currentTarget; const files = Array.from(input.files ?? []); void importModels(files).finally(() => { input.value = ""; }); }} />
-                <p className="floating-note">{cloudLibrary ? "New imports are saved privately to cloud and cached on this device." : "Models are saved on this device while cloud sync is unavailable."} Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package.</p>
-                {cloudLibrary && <p className="floating-note">Models + scenes: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB shared. 2 GB stays unused as a safety buffer. Pending uploads count toward the budget.</p>}
-                {activePackage && cloudLibrary && !cloudLibrary.models.some((model) => model.id === activePackage.id) && <button className="floating-option" type="button" disabled={modelImporting} onClick={() => { void saveActiveModelToCloud(); }}>Save this model to cloud</button>}
-                {activePackage && <button className="floating-option model-remove" type="button" disabled={modelImporting} onClick={() => { void removeActiveModel(); }}>{cloudLibrary?.models.some((model) => model.id === activePackage.id) ? "Delete this package from cloud and this device" : "Remove this package from browser"}</button>}
+                {(() => {
+                  const canUseCloudModels = account
+                    ? account.capabilities.canUseCloudModels
+                    : isCloudLibraryAllowed(cloudLibrary);
+                  const isFreeTier = account ? account.tier === "free" : cloudLibrary?.cloudAllowed === false;
+                  const isSelectedTier = account ? account.tier === "selected" : cloudLibrary?.tier === "selected";
+                  const isSorachanTier = account ? account.tier === "sorachan" : cloudLibrary?.tier === "sorachan";
+                  const isCloudModelPackage = Boolean(
+                    activePackage && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.models.some((model) => model.id === activePackage.id),
+                  );
+                  const personalUsedBytes = cloudLibrary?.personalUsage?.used ?? account?.storage.usedBytes ?? 0;
+                  const personalLimitBytes = cloudLibrary?.personalUsage?.limit ?? account?.storage.limitBytes ?? 512 * 1024 * 1024;
+                  return <>
+                    <p className="floating-note">
+                      {isFreeTier
+                        ? "นำเข้าโมเดลจาก ZIP หรือโฟลเดอร์เพื่อใช้งานบนอุปกรณ์นี้ได้ปกติ Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package."
+                        : canUseCloudModels && cloudLibrary
+                          ? "New imports are saved privately to cloud and cached on this device. Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package."
+                          : "Models are saved on this device while cloud sync is unavailable. Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package."}
+                    </p>
+                    {isFreeTier && (
+                      <div className="tier-gate-notice" role="note">
+                        <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
+                        <button type="button" className="floating-option model-import-primary" onClick={() => setRequestModalOpen(true)}>
+                          Request Selected Tier
+                        </button>
+                      </div>
+                    )}
+                    {isSelectedTier && canUseCloudModels && (
+                      <p className="floating-note">
+                        Personal Cloud R2: {formatPersonalMb(personalUsedBytes)} / {Math.round(personalLimitBytes / (1024 * 1024))} MB
+                      </p>
+                    )}
+                    {isSorachanTier && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.usage && (
+                      <p className="floating-note">
+                        Models + scenes: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB shared. 2 GB stays unused as a safety buffer. Pending uploads count toward the budget.
+                      </p>
+                    )}
+                    {activePackage && canUseCloudModels && isCloudLibraryAllowed(cloudLibrary) && !isCloudModelPackage && (
+                      <button className="floating-option" type="button" disabled={modelImporting} onClick={() => { void saveActiveModelToCloud(); }}>
+                        Save this model to cloud
+                      </button>
+                    )}
+                    {activePackage && (
+                      <button className="floating-option model-remove" type="button" disabled={modelImporting} onClick={() => { void removeActiveModel(); }}>
+                        {isCloudModelPackage ? "Delete this package from cloud and this device" : "Remove this package from browser"}
+                      </button>
+                    )}
+                  </>;
+                })()}
               </>}
               {characterTab === "expression" && <>
                 <button type="button" className="floating-option" disabled={modelStatus !== "ready" || !activeExpressions.length} onClick={clearSavedExpressions}>Reset saved expressions</button>
@@ -2839,7 +3059,7 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
               </>}
               {modelNotice && <p className="model-notice" role="alert">{modelNotice}</p>}
             </>}
-            {panel === "scenes" && <><SceneManager library={sceneLibrary}/><p className="floating-note">Default backgrounds</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
+            {panel === "scenes" && <><SceneManager library={sceneLibrary} cloudAllowed={account ? account.capabilities.canUseCloudScenes : true} onRequestSelected={() => setRequestModalOpen(true)}/><p className="floating-note">Default backgrounds</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
             {panel === "voice" && <>
               <button type="button" className="floating-option" onClick={() => { setMuted((value) => { const next = !value; if (next) stopSpeech(); return next; }); }}>
                 <Icon name="sound" size={18}/> Vivian voice <strong>{muted ? "Off" : "On"}</strong>
@@ -2876,14 +3096,46 @@ export default function Companion({ accountEmail, accountId }: { accountEmail: s
                 <Icon name="mic" size={18}/> Microphone <strong>{recording ? "Listening" : "Start"}</strong>
               </button>
             </>}
-             {panel === "status" && <StorageStatusPanel/>}
-              {panel === "settings" && <><div className="custom-instructions"><strong>Reset Vivian</strong><p>ล้างความจำ แชต Mood และความสัมพันธ์บนคลาวด์ที่ใช้ร่วมกัน รวมถึงประวัติแชต — คำแนะนำส่วนตัว (persona) จะยังอยู่ ไม่ถูกล้าง</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ข้อมูลนี้จะถูกลบถาวรจากคลาวด์ที่ใช้ร่วมกันและแชตบนอุปกรณ์นี้ โมเดล การตั้งค่าเสียง และบัญชีล็อกอินจะยังอยู่</p><button type="button" className="floating-option" disabled={sending || resetting} onClick={() => { void resetVivian(); }}>ยืนยันรีเซ็ต Vivian</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังรีเซ็ต…" : "Reset memories and companion"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>Vivian personality & custom instructions</strong><p>กำหนดบุคลิก วิธีพูด น้ำเสียง นิสัย ความสนใจ และวิธีปฏิบัติต่อคุณได้จากช่องเดียว คำแนะนำนี้มี Priority เหนือบุคลิกเริ่มต้นของ Vivian และถูกใช้กับทุกแชต (ข้อกำหนดด้านความปลอดภัย ความจริง และขีดจำกัดของระบบยังคงเดิม)</p><textarea aria-label="Vivian personality and custom instructions" value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="ตัวอย่าง: ให้ Vivian ร่าเริงขึ้น พูดเป็นกันเอง ชอบแซวแบบน่ารัก ตอบภาษาไทยธรรมชาติ และไม่ต้องลงท้ายทุกประโยคด้วยคำถาม..."/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "Saving…" : "Save"}</button><button type="button" className="floating-option" disabled={savingCustomInstructions || !savedCustomInstructions} onClick={() => { void clearCustomInstructions(); }}>ล้างคำแนะนำ</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้บันทึก" : "ซิงก์ทุกเครื่องแล้ว")}</span><span role="status">{customInstructions.length} / 2000</span></div>{customInstructionVersions.length > 1 && <div className="custom-instruction-versions"><span>เวอร์ชันก่อนหน้า</span>{customInstructionVersions.slice(1, 4).map((v) => <button key={v.id} type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => restoreCustomInstructions(v.instructions)}>Restore previous version {new Date(v.created_at).toLocaleString()}</button>)}</div>}</div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> Language <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> About Vivian</button></>}
-            {panel === "settings" && <div className="account-settings"><div><small>ลงชื่อเข้าใช้ด้วย</small><p>{accountEmail}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
+             {panel === "status" && <StorageStatusPanel account={account} onRequestSelected={() => setRequestModalOpen(true)}/>}
+              {panel === "settings" && <>
+                <TierSettingsCard account={account} accountEmail={accountEmail} accountId={accountId} loading={accountLoading} onOpenRequest={() => setRequestModalOpen(true)} />
+                {account?.tier === "sorachan" && account?.capabilities?.isAdmin && (
+                  <SorachanAdminPanel onAccountChanged={() => { void refreshAccount(); }} />
+                )}
+                <div className="custom-instructions"><strong>Reset Vivian</strong><p>ล้างความจำ แชต Mood และความสัมพันธ์บนคลาวด์ที่ใช้ร่วมกัน รวมถึงประวัติแชต — คำแนะนำส่วนตัว (persona) จะยังอยู่ ไม่ถูกล้าง</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ข้อมูลนี้จะถูกลบถาวรจากคลาวด์ที่ใช้ร่วมกันและแชตบนอุปกรณ์นี้ โมเดล การตั้งค่าเสียง และบัญชีล็อกอินจะยังอยู่</p><button type="button" className="floating-option" disabled={sending || resetting} onClick={() => { void resetVivian(); }}>ยืนยันรีเซ็ต Vivian</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังรีเซ็ต…" : "Reset memories and companion"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>Vivian personality & custom instructions</strong><p>กำหนดบุคลิก วิธีพูด น้ำเสียง นิสัย ความสนใจ และวิธีปฏิบัติต่อคุณได้จากช่องเดียว คำแนะนำนี้มี Priority เหนือบุคลิกเริ่มต้นของ Vivian และถูกใช้กับทุกแชต (ข้อกำหนดด้านความปลอดภัย ความจริง และขีดจำกัดของระบบยังคงเดิม)</p><textarea aria-label="Vivian personality and custom instructions" value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="ตัวอย่าง: ให้ Vivian ร่าเริงขึ้น พูดเป็นกันเอง ชอบแซวแบบน่ารัก ตอบภาษาไทยธรรมชาติ และไม่ต้องลงท้ายทุกประโยคด้วยคำถาม..."/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "Saving…" : "Save"}</button><button type="button" className="floating-option" disabled={savingCustomInstructions || !savedCustomInstructions} onClick={() => { void clearCustomInstructions(); }}>ล้างคำแนะนำ</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้บันทึก" : "ซิงก์ทุกเครื่องแล้ว")}</span><span role="status">{customInstructions.length} / 2000</span></div>{customInstructionVersions.length > 1 && <div className="custom-instruction-versions"><span>เวอร์ชันก่อนหน้า</span>{customInstructionVersions.slice(1, 4).map((v) => <button key={v.id} type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => restoreCustomInstructions(v.instructions)}>Restore previous version {new Date(v.created_at).toLocaleString()}</button>)}</div>}</div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> Language <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> About Vivian</button>
+              </>}
+            {panel === "settings" && <div className="account-settings"><div><small>ลงชื่อเข้าใช้ด้วย</small><p>{accountEmail || "กำลังตรวจสอบบัญชี…"}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
           </div>
         </section>
       </div>
     </div>
     {languageOpen && <div className="chat-backdrop" role="presentation" onClick={() => setLanguageOpen(false)}><section className="info-sheet language-sheet" role="dialog" aria-modal="true" aria-label="ล็อกภาษาการพูด" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>LANGUAGE LOCK</small><h1>ภาษาการพูด</h1><p>ใช้ภาษาเดียวกันทั้งฟังเสียงและตอบด้วยเสียง</p></div><button type="button" onClick={() => setLanguageOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="language-options">{LANGUAGE_OPTIONS.map((option) => <button key={option.code} type="button" className={speechLanguage === option.code ? "is-selected" : ""} onClick={() => { saveLanguage(option.code); setLanguageOpen(false); }}><strong>{option.nativeName}</strong><span>{option.label} · {option.code.toUpperCase()}</span></button>)}</div></section></div>}
     {infoOpen && <div className="chat-backdrop" role="presentation" onClick={() => setInfoOpen(false)}><section className="info-sheet" role="dialog" aria-modal="true" aria-label="ข้อมูลเวอร์ชัน" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>VIVIAN INFO</small><h1>ข้อมูลเวอร์ชัน</h1><p>ข้อมูลของ companion เวอร์ชันที่กำลังใช้งาน</p></div><button type="button" onClick={() => setInfoOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="info-list"><p><strong>App</strong>Vivian AI Companion</p><p><strong>Codename</strong>{APP_CODENAME}</p><p><strong>Version</strong>vivian 2.5.1</p><p><strong>Character</strong>Nothing</p></div></section></div>}
+    <RequestSelectedModal
+      open={requestModalOpen}
+      account={account}
+      accountEmail={accountEmail}
+      accountId={accountId}
+      onClose={() => setRequestModalOpen(false)}
+      onSubmitted={(result) => {
+        setAccount((prev) =>
+          prev
+            ? {
+                ...prev,
+                selectedRequest: result.request,
+                mailtoUrl: result.mailtoUrl,
+                requestEmail: result.requestEmail,
+              }
+            : prev,
+        );
+      }}
+      onAccountRefresh={() => refreshAccount()}
+    />
+    <LimitReachedModal
+      open={limitModalOpen}
+      account={account}
+      onClose={() => setLimitModalOpen(false)}
+      onOpenRequest={() => setRequestModalOpen(true)}
+    />
   </main>;
 }

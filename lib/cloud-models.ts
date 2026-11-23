@@ -1,16 +1,49 @@
 "use client";
 import { authFetch } from "@/lib/auth/fetch";
 import { importModelFiles, inspectPackage, type ModelPackage } from "@/lib/local-models";
-import { MODEL_MAX_BYTES, MODEL_PART_BYTES, type CloudModel, type StorageUsage } from "@/lib/cloud-storage";
+import { MODEL_MAX_BYTES, MODEL_PART_BYTES, type CloudModel, type PersonalStorageUsage, type StorageUsage } from "@/lib/cloud-storage";
 import { notifyStorageChanged } from "@/lib/storage-status";
 
+export type CloudLibraryTier = "free" | "selected" | "sorachan";
 export interface CloudModelPreference { modelId: string; lastSelectedAt: string; revision: string }
-export interface CloudLibrary { userId: string; models: CloudModel[]; usage: StorageUsage; preference?: CloudModelPreference | null }
+export interface CloudLibrary {
+  userId: string;
+  tier?: CloudLibraryTier;
+  cloudAllowed?: boolean;
+  sharedAllowed?: boolean;
+  models: CloudModel[];
+  usage: StorageUsage | null;
+  personalUsage?: PersonalStorageUsage | null;
+  preference?: CloudModelPreference | null;
+}
+export class CloudModelError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+    public requiredTier?: CloudLibraryTier,
+  ) {
+    super(message);
+  }
+}
+export function isCloudLibraryAllowed(library: CloudLibrary | null | undefined): boolean {
+  return Boolean(library && library.cloudAllowed !== false && library.tier !== "free");
+}
 export const SHARED_MODEL_OWNER = "shared";
 async function json<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await authFetch(path, { ...options, cache: "no-store", signal: options?.signal ?? AbortSignal.timeout(35_000) });
   const body = await response.json();
-  if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Cloud storage is unavailable.");
+  if (!response.ok) {
+    const requiredTier = body.requiredTier === "free" || body.requiredTier === "selected" || body.requiredTier === "sorachan"
+      ? body.requiredTier
+      : undefined;
+    throw new CloudModelError(
+      typeof body.error === "string" ? body.error : "Cloud storage is unavailable.",
+      response.status,
+      typeof body.code === "string" ? body.code : undefined,
+      requiredTier,
+    );
+  }
   return body as T;
 }
 export const getCloudModels = (signal?: AbortSignal): Promise<CloudLibrary> => json("/api/models", { signal });
@@ -51,11 +84,11 @@ export async function modelArchive(pack: ModelPackage, originalZip?: File): Prom
   await complete;
   return new Blob(chunks, { type: "application/zip" });
 }
-export async function uploadCloudModel(pack: ModelPackage, progress: (message: string) => void, originalZip?: File, signal?: AbortSignal): Promise<{ pack: ModelPackage; usage: StorageUsage }> {
+export async function uploadCloudModel(pack: ModelPackage, progress: (message: string) => void, originalZip?: File, signal?: AbortSignal): Promise<{ pack: ModelPackage; byteSize: number; scope?: "private" | "shared"; usage: StorageUsage | null; personalUsage?: PersonalStorageUsage | null }> {
   progress("Preparing model for private cloud storage…");
   const archive = await modelArchive(pack, originalZip);
   signal?.throwIfAborted();
-    const started = await json<{ id: string; userId: string; scope?: "private" | "shared" }>("/api/models", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ byteSize: archive.size, manifests: pack.models.map((model) => ({ path: model.manifestPath, name: model.name })) }) });
+  const started = await json<{ id: string; userId: string; scope?: "private" | "shared" }>("/api/models", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ byteSize: archive.size, manifests: pack.models.map((model) => ({ path: model.manifestPath, name: model.name })) }) });
   notifyStorageChanged();
   let completing = false;
   try {
@@ -69,10 +102,16 @@ export async function uploadCloudModel(pack: ModelPackage, progress: (message: s
       }
     }
     completing = true;
-    const finished = await json<{ usage: StorageUsage }>(`/api/models/${started.id}`, { method: "POST", signal });
+    const finished = await json<{ usage?: StorageUsage | null; personalUsage?: PersonalStorageUsage | null }>(`/api/models/${started.id}`, { method: "POST", signal });
     notifyStorageChanged();
     const stored = await inspectPackage(pack.assets, started.id);
-    return { pack: { ...stored, cloudOwner: started.scope === "shared" ? SHARED_MODEL_OWNER : started.userId }, usage: finished.usage };
+    return {
+      pack: { ...stored, cloudOwner: started.scope === "shared" ? SHARED_MODEL_OWNER : started.userId },
+      byteSize: archive.size,
+      scope: started.scope,
+      usage: finished.usage ?? null,
+      personalUsage: finished.personalUsage ?? null,
+    };
   } catch (error) {
     // Completion may have committed despite a lost response: never delete a
     // possibly successful model. Pending sessions are cleaned on refresh.

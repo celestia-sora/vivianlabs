@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAuthToken, setAuthToken } from "@/lib/auth/fetch";
+import { clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth/fetch";
 
 const VIVIANAUTH_LOGIN_URL = "https://vivianauth.celestiasora.workers.dev/login";
 
@@ -15,8 +15,10 @@ export default function LoginPage(): React.JSX.Element {
 
   useEffect(() => {
     try {
-      if (new URLSearchParams(window.location.search).get("error") === "access_denied") {
-        window.localStorage.removeItem("vivian_auth_token");
+      const params = new URLSearchParams(window.location.search);
+      const error = params.get("error");
+      if (error === "access_denied") {
+        clearAuthToken();
         window.location.replace("/access-denied");
         return;
       }
@@ -28,7 +30,9 @@ export default function LoginPage(): React.JSX.Element {
         window.location.replace("/");
         return;
       }
-      if (getAuthToken()) {
+      if (error === "session_expired") {
+        clearAuthToken();
+      } else if (getAuthToken()) {
         window.location.replace("/");
         return;
       }

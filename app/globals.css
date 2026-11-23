@@ -459,3 +459,76 @@ img.conversation-avatar { display: block; width: 38px; height: 38px; object-fit:
   .orb-dock button, .composer-pill, .composer-pill .circle-control .app-icon { transition: none; }
   .orb-toolbar { animation: none; }
 }
+
+/* Tier badges, quota cards, upgrade/limit modals, and Sorachan admin panel. */
+.tier-badge { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; padding: 3px 10px; border-radius: 999px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; border: 1px solid #24132926; }
+.tier-badge.is-free { background: rgb(255 255 255 / .75); color: #5f5470; }
+.tier-badge.is-selected { background: linear-gradient(135deg, #e0d6ff, #c9b5f7); color: #241329; border-color: #9e7cd8; }
+.tier-badge.is-sorachan { background: linear-gradient(135deg, #4b2d6d, #7c4f9b); color: #fffaf5; border-color: #4b2d6d; }
+
+.tier-menu-card { display: grid; gap: 6px; margin-bottom: 10px; padding: 11px 13px; border: 1px solid #24132922; border-radius: 15px; background: rgb(255 255 255 / .52); font: 12px system-ui, sans-serif; }
+.tier-menu-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tier-menu-quota { color: #241329; font-size: 13px; font-weight: 600; }
+.tier-menu-meta { display: grid; gap: 2px; color: #5f5470; font-size: 11px; }
+.tier-menu-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7c6aa8; font-size: 11px; }
+.tier-menu-upgrade { justify-self: start; margin-top: 2px; padding: 6px 12px; border: 1px solid #9e7cd8; border-radius: 999px; color: #241329; background: #e0d6ff; font: 600 12px system-ui, sans-serif; }
+.tier-menu-upgrade:hover { background: #d4c6fb; }
+
+.tier-settings-card { margin-bottom: 14px; }
+.tier-settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.tier-settings-head strong { display: block; color: #241329; font: 600 14px system-ui, sans-serif; }
+.tier-settings-head p { margin: 2px 0 0; color: #5f5470; font: 13px system-ui, sans-serif; }
+.tier-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.tier-settings-actions .floating-option { flex: 1 1 180px; margin-top: 0; justify-content: center; text-decoration: none; }
+.tier-mailto-link { display: flex; align-items: center; justify-content: center; text-decoration: none; color: #4b2d6d; }
+.tier-mailto-link:hover { background: #e0d6ff; }
+
+.tier-request-status { display: grid; gap: 3px; margin: 8px 0 4px; padding: 10px 12px; border: 1px solid #24132922; border-radius: 12px; background: rgb(255 255 255 / .65); font: 12px/1.45 system-ui, sans-serif; }
+.tier-request-status.is-pending { border-color: #c292d8; background: #f6efff; }
+.tier-request-status.is-approved { border-color: #4ea874; background: #eefaf3; }
+.tier-request-status.is-rejected { border-color: #d184a0; background: #fff0f5; }
+.tier-request-status span, .tier-request-status small { color: #5f5470; font-size: 11px; }
+
+.tier-modal { max-height: min(86dvh, 720px); overflow-y: auto; font-family: system-ui, sans-serif; }
+.tier-modal .memory-sheet-head { margin-bottom: 14px; }
+.tier-request-form { display: grid; gap: 10px; margin-top: 10px; }
+.tier-request-form label { display: grid; gap: 5px; font-size: 12px; color: #5f5470; }
+.tier-request-form input, .tier-request-form textarea { width: 100%; padding: 9px 11px; border: 1px solid #24132930; border-radius: 11px; color: #241329; background: #fff; font: 14px system-ui, sans-serif; }
+.tier-request-form textarea { min-height: 82px; resize: vertical; }
+.tier-modal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.tier-modal-actions .floating-option { flex: 1 1 140px; margin-top: 0; justify-content: center; }
+.tier-submit-feedback { margin-top: 10px; padding: 10px 12px; border: 1px solid #b98ad6; border-radius: 12px; background: #f3ecff; font-size: 13px; line-height: 1.5; }
+.tier-submit-feedback p { margin: 0; }
+.tier-mailto-box { margin-top: 12px; padding-top: 10px; border-top: 1px solid #2413291a; display: grid; gap: 8px; }
+.tier-mailto-box .floating-option { margin-top: 0; }
+
+.tier-gate-notice { display: grid; gap: 6px; margin-top: 12px; padding: 12px 14px; border: 1px solid #b98ad666; border-radius: 14px; background: rgb(255 255 255 / .58); font: 12px/1.5 system-ui, sans-serif; color: #241329; }
+.tier-gate-notice p, .tier-gate-card .tier-gate-copy { margin: 0; font-size: 13px; color: #241329; }
+.tier-gate-notice small { color: #5f5470; font-size: 11px; }
+.tier-gate-notice .floating-option, .tier-gate-card .floating-option { margin-top: 4px; justify-content: center; }
+
+.sorachan-admin-panel { margin-bottom: 14px; gap: 10px; }
+.sorachan-refresh-btn { width: auto !important; margin-top: 0 !important; padding: 6px 12px; min-height: 32px; }
+.admin-section { display: grid; gap: 7px; margin-top: 4px; }
+.admin-section-label { color: #7c6aa8; font: 700 10px system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+.admin-request-list { display: grid; gap: 8px; }
+.admin-request-card { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid #24132922; border-radius: 12px; background: rgb(255 255 255 / .72); font: 12px system-ui, sans-serif; }
+.admin-request-card.is-reviewed { opacity: .88; }
+.admin-request-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.admin-request-head strong { overflow-wrap: anywhere; font-size: 13px; }
+.admin-request-card p { margin: 0; color: #241329; }
+.admin-request-card input { width: 100%; padding: 7px 10px; border: 1px solid #24132929; border-radius: 9px; background: #fff; font: 12px system-ui, sans-serif; }
+.admin-request-actions { display: flex; gap: 8px; }
+.admin-request-actions .floating-option { flex: 1; margin-top: 0; justify-content: center; min-height: 34px; }
+.admin-recent-details { margin-top: 4px; font: 12px system-ui, sans-serif; }
+.admin-recent-details summary { cursor: pointer; color: #7c6aa8; font-weight: 600; padding: 4px 0; }
+.admin-set-tier-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.admin-set-tier-form input { flex: 1 1 180px; min-width: 0; padding: 8px 10px; border: 1px solid #24132929; border-radius: 10px; background: #fff; color: #241329; font: 13px system-ui, sans-serif; }
+.admin-set-tier-form select { padding: 8px 10px; border: 1px solid #24132929; border-radius: 10px; background: #fff; color: #241329; font: 13px system-ui, sans-serif; }
+.admin-set-tier-form button { flex: 0 0 auto; width: auto; margin-top: 0; min-height: 36px; }
+.admin-account-list { display: grid; gap: 6px; margin-top: 6px; }
+.admin-account-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid #2413291f; border-radius: 10px; background: rgb(255 255 255 / .65); }
+.admin-account-meta { flex: 1 1 160px; min-width: 0; display: grid; }
+.admin-account-meta strong, .admin-account-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-account-meta small { color: #5f5470; font-size: 10px; }
+.admin-account-row .floating-option { flex: 0 0 auto; width: auto; margin-top: 0; min-height: 32px; padding: 5px 10px; font-size: 12px; }

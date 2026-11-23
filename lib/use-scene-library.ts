@@ -9,10 +9,28 @@ import { startTiming, cancelTiming, type LocalTiming } from "@/lib/performance";
 import { preloadSceneLibrary } from "@/lib/scene-preload";
 export { preloadSceneImage } from "@/lib/scene-preload";
 
+export class SceneRequestError extends Error {
+  constructor(
+    message: string,
+    public status?: number,
+    public code?: string,
+    public requiredTier?: string,
+  ) {
+    super(message);
+  }
+}
+
 export async function sceneRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await authFetch(path, { ...options, signal: options?.signal ?? AbortSignal.timeout(25_000) });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? "Could not save scene changes. Please try again.");
+  if (!response.ok) {
+    throw new SceneRequestError(
+      data.error ?? "Could not save scene changes. Please try again.",
+      response.status,
+      typeof data.code === "string" ? data.code : undefined,
+      typeof data.requiredTier === "string" ? data.requiredTier : undefined,
+    );
+  }
   if (options?.method && options.method !== "GET") notifyStorageChanged();
   return data as T;
 }

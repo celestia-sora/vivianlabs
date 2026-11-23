@@ -6,9 +6,18 @@ import { useEffect, useRef, useState } from "react";
 import AnimatedFileUpload from "@/components/ui/smoothui/animated-file-upload";
 import { authFetch } from "@/lib/auth/fetch";
 import { SCENE_MAX_BYTES, SCENE_MAX_COUNT, SCENE_MIME_TYPES, validateSceneLabel, type VivianScene } from "@/lib/scenes";
-import { sceneRequest, type SceneLibrary } from "@/lib/use-scene-library";
+import { SceneRequestError, sceneRequest, type SceneLibrary } from "@/lib/use-scene-library";
+import { CLOUD_TIER_REQUIRED_MESSAGE } from "@/app/components/tier-panel";
 
-export function SceneManager({ library }: { library: SceneLibrary }) {
+export function SceneManager({
+  library,
+  cloudAllowed = true,
+  onRequestSelected,
+}: {
+  library: SceneLibrary;
+  cloudAllowed?: boolean;
+  onRequestSelected?: () => void;
+}) {
   const [editor, setEditor] = useState<{ scene?: VivianScene; replace: boolean } | null>(null);
   const [label, setLabel] = useState("");
   const [mode, setMode] = useState<"upload" | "url">("upload");
@@ -17,6 +26,7 @@ export function SceneManager({ library }: { library: SceneLibrary }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tierRequiredError, setTierRequiredError] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const labelInput = useRef<HTMLInputElement>(null);
@@ -29,31 +39,38 @@ export function SceneManager({ library }: { library: SceneLibrary }) {
   }
   function open(scene?: VivianScene, replace = true) {
     previewRequest.current?.abort();
-    setEditor({ scene, replace }); setLabel(scene?.label ?? ""); setMode("upload"); setFile(null); setUrl(""); setPreview(scene?.imageUrl ?? null); setError(null); setSuccess(null);
+    setEditor({ scene, replace }); setLabel(scene?.label ?? ""); setMode("upload"); setFile(null); setUrl(""); setPreview(scene?.imageUrl ?? null); setError(null); setTierRequiredError(false); setSuccess(null);
     window.setTimeout(() => labelInput.current?.focus(), 0);
   }
   function chooseFile(image?: File) {
-    setError(null); setPreview(null); setFile(null);
+    setError(null); setTierRequiredError(false); setPreview(null); setFile(null);
     if (!image) return;
     if (!SCENE_MIME_TYPES.includes(image.type) || image.size > SCENE_MAX_BYTES || !image.size) { setError("Choose a JPG, PNG, WebP or AVIF image under 8 MB."); return; }
     setFile(image); setPreview(URL.createObjectURL(image));
   }
   async function previewUrl() {
-    setWorking(true); setError(null); setPreview(null);
+    setWorking(true); setError(null); setTierRequiredError(false); setPreview(null);
     const controller = new AbortController(); previewRequest.current = controller;
     try {
       validateSceneLabel(label);
       const parsed = new URL(url);
       if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Enter an HTTP or HTTPS image URL.");
       const response = await authFetch("/api/scenes/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label, url }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]) });
-      if (!response.ok) throw new Error((await response.json()).error ?? "Image import failed.");
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
+        if (payload.code === "TIER_REQUIRED") {
+          setTierRequiredError(true);
+          throw new Error(CLOUD_TIER_REQUIRED_MESSAGE);
+        }
+        throw new Error(payload.error ?? "Image import failed.");
+      }
       const blob = await response.blob();
       if (!controller.signal.aborted) setPreview(URL.createObjectURL(blob));
     } catch (error) { if (!controller.signal.aborted) setError((error as Error).message === "Invalid URL" ? "Enter a valid image URL." : (error as Error).message); }
     finally { setWorking(false); }
   }
   async function save(event: React.FormEvent) {
-    event.preventDefault(); setWorking(true); setError(null);
+    event.preventDefault(); setWorking(true); setError(null); setTierRequiredError(false);
     try {
       const validatedLabel = validateSceneLabel(label);
       let options: RequestInit;
@@ -66,7 +83,14 @@ export function SceneManager({ library }: { library: SceneLibrary }) {
       library.invalidateRequests();
       await library.refresh();
       setEditor(null); setSuccess(`Saved ${scene.label}.`);
-    } catch (error) { setError((error as Error).message); }
+    } catch (error) {
+      if (error instanceof SceneRequestError && error.code === "TIER_REQUIRED") {
+        setTierRequiredError(true);
+        setError(CLOUD_TIER_REQUIRED_MESSAGE);
+      } else {
+        setError((error as Error).message);
+      }
+    }
     finally { setWorking(false); }
   }
   async function remove(scene: VivianScene) {
@@ -78,6 +102,22 @@ export function SceneManager({ library }: { library: SceneLibrary }) {
     } catch (error) { setError((error as Error).message); }
     finally { setWorking(false); }
   }
+
+  if (!cloudAllowed) {
+    return <div className="scene-manager">
+      <div className="tier-gate-notice" role="note">
+        <strong>Private Cloud Scenes · Selected Tier ขึ้นไป</strong>
+        <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
+        <small>ฉากสำเร็จรูปด้านล่าง (Christmas Day / Night) ยังสามารถเปลี่ยนและใช้งานได้ตามปกติค่ะ</small>
+        {onRequestSelected && (
+          <button type="button" className="floating-option model-import-primary" onClick={onRequestSelected}>
+            Request Selected Tier
+          </button>
+        )}
+      </div>
+    </div>;
+  }
+
   return <div className="scene-manager">
     {library.notice && <div role="alert" className="model-notice">{library.notice}{!library.ready && <button type="button" className="floating-option" onClick={() => void library.refresh().catch((error: Error) => library.setNotice(error.message))}>Retry loading scenes</button>}</div>}
     {success && <p role="status" className="floating-note">{success}</p>}
@@ -100,7 +140,7 @@ export function SceneManager({ library }: { library: SceneLibrary }) {
       <small>{[...label.trim().normalize("NFC")].length}/50 characters</small>
       {editor.replace && <>
         <p className="floating-note">Image source</p>
-        <div className="floating-tabs">{(["upload", "url"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value} className={mode === value ? "is-selected" : ""} disabled={working} onClick={() => { setMode(value); setFile(null); setPreview(null); setError(null); }}>{value === "upload" ? "Upload Image" : "Image URL"}</button>)}</div>
+        <div className="floating-tabs">{(["upload", "url"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value} className={mode === value ? "is-selected" : ""} disabled={working} onClick={() => { setMode(value); setFile(null); setPreview(null); setError(null); setTierRequiredError(false); }}>{value === "upload" ? "Upload Image" : "Image URL"}</button>)}</div>
         {mode === "upload" ? <AnimatedFileUpload
           accept={SCENE_MIME_TYPES.join(",")}
           className="vivian-upload"
@@ -111,8 +151,8 @@ export function SceneManager({ library }: { library: SceneLibrary }) {
         /> : <><label>Image URL<input type="url" required value={url} placeholder="https://example.com/wallpaper.jpg" disabled={working} onChange={(event) => { setUrl(event.target.value); setPreview(null); }}/></label><button type="button" className="floating-option" disabled={working || !url} onClick={() => void previewUrl()}>Preview image</button></>}
       </>}
       {preview && <div className="scene-preview"><p className="floating-note">Preview</p><img src={preview} alt="Scene preview" onError={() => { setPreview(null); setError("Could not preview this image. Choose a valid image."); }}/></div>}
-      {error && <p className="model-notice" role="alert">{error}</p>}
-      <div className="scene-editor-actions"><button type="button" className="floating-option" disabled={working} onClick={() => { setEditor(null); setPreview(null); setError(null); }}>Cancel</button><button type="submit" className="floating-option model-import-primary" disabled={working}>{working ? "Working…" : "Save Scene"}</button></div>
+      {error && <div className="model-notice" role="alert"><p style={{ margin: 0 }}>{error}</p>{tierRequiredError && onRequestSelected && <button type="button" className="floating-option model-import-primary" onClick={onRequestSelected}>Request Selected Tier</button>}</div>}
+      <div className="scene-editor-actions"><button type="button" className="floating-option" disabled={working} onClick={() => { setEditor(null); setPreview(null); setError(null); setTierRequiredError(false); }}>Cancel</button><button type="submit" className="floating-option model-import-primary" disabled={working}>{working ? "Working…" : "Save Scene"}</button></div>
     </form>}
     {!editor && error && <p className="model-notice" role="alert">{error}</p>}
     {!library.ready && !library.notice && <p className="floating-note" role="status">Loading scenes…</p>}
