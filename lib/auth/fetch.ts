@@ -11,6 +11,13 @@
 // API routes' requireApiAccess, which verify via vivianAuth /api/verify).
 export const TOKEN_KEY = "vivian_auth_token";
 
+const FEATURE_OR_QUOTA_403_CODES = new Set([
+  "TIER_REQUIRED",
+  "QUOTA_EXCEEDED",
+  "STORAGE_QUOTA_EXCEEDED",
+  "ADMIN_REQUIRED",
+]);
+
 export function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(TOKEN_KEY);
@@ -31,12 +38,28 @@ export async function authFetch(path: string, options?: RequestInit): Promise<Re
   const headers = new Headers(options?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(path, { ...options, headers });
-  if (response.status === 401 || response.status === 403) {
-    if (response.status === 403) {
-      clearAuthToken();
-      window.location.replace("/access-denied");
-    } else {
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
       window.location.replace("/login?error=session_expired");
+    }
+    return response;
+  }
+  if (response.status === 403) {
+    let code: string | null = null;
+    try {
+      const payload = (await response.clone().json()) as { code?: unknown } | null;
+      if (payload && typeof payload.code === "string") {
+        code = payload.code;
+      }
+    } catch {
+      // Non-JSON 403 is treated as an auth denial below.
+    }
+    if (code && FEATURE_OR_QUOTA_403_CODES.has(code)) {
+      return response;
+    }
+    clearAuthToken();
+    if (typeof window !== "undefined") {
+      window.location.replace("/access-denied");
     }
   }
   return response;

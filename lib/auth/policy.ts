@@ -5,16 +5,28 @@ export interface AuthUserLike {
   is_anonymous?: boolean;
 }
 
-const INVITED_EMAILS = new Set([
-  "suphloeksangko@gmail.com",
+export const PRIMARY_LEGACY_EMAIL = "suphloeksangko@gmail.com";
+export const SELECTED_REQUEST_EMAIL = "viviannextlabs@gmail.com";
+
+export const SORACHAN_EMAILS = new Set<string>([
+  PRIMARY_LEGACY_EMAIL,
   "duckchan690@gmail.com",
 ]);
 
-// Only confirmed, non-anonymous accounts on the invitation list can access.
-// Normalize case and surrounding whitespace before checking the verified email.
+export function normalizeEmail(email: string | null | undefined): string {
+  return typeof email === "string" ? email.trim().toLowerCase() : "";
+}
+
+export function isSorachanEmail(email: string | null | undefined): boolean {
+  const normalized = normalizeEmail(email);
+  return normalized.length > 0 && SORACHAN_EMAILS.has(normalized);
+}
+
+// Any confirmed, non-anonymous account with a non-empty email can access the Free tier.
 export function isAllowedUser(user: AuthUserLike | null): boolean {
-  const email = user?.email?.trim().toLowerCase();
-  return Boolean(user && !user.is_anonymous && email && INVITED_EMAILS.has(email) && user.email_confirmed_at);
+  const email = normalizeEmail(user?.email);
+  const confirmed = typeof user?.email_confirmed_at === "string" && user.email_confirmed_at.trim().length > 0;
+  return Boolean(user && !user.is_anonymous && email && confirmed);
 }
 
 export function isSameOriginMutation(request: Request): boolean {

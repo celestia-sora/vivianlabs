@@ -53,7 +53,12 @@ function getVerifyConfig(): { url: string; internalToken: string } | null {
 function getDevBypassUser(): AuthUser | null {
   if (process.env.NODE_ENV !== "development") return null;
   if (process.env.DEV_BYPASS_LOGIN !== "true") return null;
-  return { id: "dev-local-preview", email: "dev@localhost" };
+  return {
+    id: "dev-local-preview",
+    email: "dev@localhost",
+    email_confirmed_at: "1970-01-01T00:00:00.000Z",
+    is_anonymous: false,
+  };
 }
 
 export const getAuthAccess = cache(async (accessToken?: string): Promise<AccessResult> => {
@@ -100,4 +105,21 @@ export async function requireApiAccess(request: Request, onAuthorized?: (user: A
     status: error.status,
     headers: { "Cache-Control": "private, no-store" },
   });
+}
+
+export async function requireAuthorizedUser(request: Request): Promise<{ user: AuthUser; denied: null } | { user: null; denied: NextResponse }> {
+  let authorizedUser: AuthUser | null = null;
+  const denied = await requireApiAccess(request, (user) => {
+    authorizedUser = user;
+  });
+  if (denied || !authorizedUser) {
+    return {
+      user: null,
+      denied: denied ?? NextResponse.json({ error: "Please sign in", status: 401, code: "AUTH_REQUIRED" }, {
+        status: 401,
+        headers: { "Cache-Control": "private, no-store" },
+      }),
+    };
+  }
+  return { user: authorizedUser, denied: null };
 }

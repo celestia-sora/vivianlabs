@@ -4,12 +4,29 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SceneError, SCENE_MAX_COUNT, AUTO_SCENE_ENABLED, sceneThumbnailKey, sceneImageExtension, validateSceneId, validateSceneLabel, type VivianScene, type ScenePreferences, type SceneDecision } from "@/lib/scenes";
 import { saveCloudSceneImages, removeCloudSceneImages } from "@/lib/cloud-store";
 import { getR2Image, modelObjectSize } from "@/lib/r2";
+import type { UserTier } from "@/lib/user-tiers";
 
 const BUCKET = "vivian-scenes";
 const COLUMNS = "id,user_id,label,image_key,source_type,storage_provider,created_at,updated_at";
 interface SceneRow { id: string; user_id: string; label: string; image_key: string; source_type: "upload" | "url"; storage_provider?: "supabase" | "r2"; created_at: string; updated_at: string }
 interface PreferenceRow { user_id: string; auto_scene: boolean; active_scene_id: string | null; preset: "day" | "night" | null; revision: string }
 export interface SceneContext { userId: string; autoScene: boolean; activeSceneId: string | null; revision: string; scenes: Array<{ id: string; label: string }> }
+export interface SceneStoreOptions { tier?: UserTier }
+
+export class SceneTierError extends SceneError {
+  code: "TIER_REQUIRED";
+  requiredTier: UserTier;
+
+  constructor(
+    message: string,
+    code: "TIER_REQUIRED" = "TIER_REQUIRED",
+    requiredTier: UserTier = "selected",
+  ) {
+    super(message, 403);
+    this.code = code;
+    this.requiredTier = requiredTier;
+  }
+}
 
 export function sceneClient(signal = AbortSignal.timeout(15_000)): SupabaseClient {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -35,7 +52,13 @@ export async function getScene(db: SupabaseClient, userId: string, id: string): 
   if (!data) throw new SceneError("Scene not found.", 404);
   return data as SceneRow;
 }
-export async function getSceneLibrary(db: SupabaseClient, userId: string): Promise<{ scenes: VivianScene[]; preferences: ScenePreferences }> {
+export async function getSceneLibrary(db: SupabaseClient, userId: string, options?: SceneStoreOptions): Promise<{ scenes: VivianScene[]; preferences: ScenePreferences }> {
+  if (options?.tier === "free") {
+    const settings = await db.from("vivian_scene_preferences").select("*").eq("user_id", userId).maybeSingle();
+    check(settings.error);
+    const prefs = preferences(settings.data);
+    return { scenes: [], preferences: { ...prefs, activeSceneId: null } };
+  }
   const [scenes, settings] = await Promise.all([
     db.from("vivian_scenes").select(COLUMNS).eq("user_id", userId).order("created_at", { ascending: true }).limit(SCENE_MAX_COUNT),
     db.from("vivian_scene_preferences").select("*").eq("user_id", userId).maybeSingle(),
@@ -54,7 +77,10 @@ async function removeObject(db: SupabaseClient, userId: string, key: string, pro
     if (!error) await db.from("vivian_scene_image_gc").delete().eq("image_key", key).eq("user_id", userId);
   } catch { /* Retried by cleanupSceneImages. */ }
 }
-export async function saveScene(db: SupabaseClient, userId: string, input: { label: string; sourceType?: "upload" | "url"; image?: Buffer; thumbnail?: Buffer; mime?: string }, id?: string): Promise<VivianScene> {
+export async function saveScene(db: SupabaseClient, userId: string, input: { label: string; sourceType?: "upload" | "url"; image?: Buffer; thumbnail?: Buffer; mime?: string }, id?: string, options?: SceneStoreOptions): Promise<VivianScene> {
+  if (options?.tier === "free") {
+    throw new SceneTierError("Private cloud scenes require the Selected tier or higher.");
+  }
   input.label = validateSceneLabel(input.label);
   if (input.image && (!input.thumbnail || !input.sourceType)) throw new SceneError("Invalid scene image.");
   const previous = id ? await getScene(db, userId, id) : null;
@@ -71,12 +97,12 @@ export async function saveScene(db: SupabaseClient, userId: string, input: { lab
   let committed = false;
   try {
     if (newKey && input.image && input.thumbnail) {
-      const options = { contentType: input.mime ?? "image/webp", cacheControl: "3600", upsert: false };
+      const optionsUpload = { contentType: input.mime ?? "image/webp", cacheControl: "3600", upsert: false };
       // Serialize so failures cannot leave a second upload finishing after cleanup.
-      if (provider === "r2") await saveCloudSceneImages(db, userId, newKey, input.image, input.thumbnail, input.mime);
+      if (provider === "r2") await saveCloudSceneImages(db, userId, newKey, input.image, input.thumbnail, input.mime, options?.tier ? { tier: options.tier } : undefined);
       else {
-        check((await db.storage.from(BUCKET).upload(newKey, input.image, options)).error);
-        check((await db.storage.from(BUCKET).upload(objectKeys(newKey)[1], input.thumbnail, { ...options, contentType: "image/webp" })).error);
+        check((await db.storage.from(BUCKET).upload(newKey, input.image, optionsUpload)).error);
+        check((await db.storage.from(BUCKET).upload(objectKeys(newKey)[1], input.thumbnail, { ...optionsUpload, contentType: "image/webp" })).error);
       }
     }
     const values = { label: input.label, ...(newKey ? { image_key: newKey, source_type: input.sourceType, storage_provider: provider } : {}), updated_at: new Date().toISOString() };
@@ -110,7 +136,7 @@ export async function deleteScene(db: SupabaseClient, userId: string, id: string
   const { error } = await db.from("vivian_scenes").delete().eq("user_id", userId).eq("id", id); check(error);
   await removeObject(db, userId, scene.image_key, scene.storage_provider);
 }
-export async function setScenePreferences(db: SupabaseClient, userId: string, value: unknown): Promise<ScenePreferences> {
+export async function setScenePreferences(db: SupabaseClient, userId: string, value: unknown, options?: SceneStoreOptions): Promise<ScenePreferences> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new SceneError("Invalid scene settings.");
   const body = value as Record<string, unknown>;
   const changes: Record<string, unknown> = { user_id: userId, revision: randomUUID(), updated_at: new Date().toISOString() };
@@ -119,7 +145,12 @@ export async function setScenePreferences(db: SupabaseClient, userId: string, va
     changes.auto_scene = AUTO_SCENE_ENABLED ? body.autoScene : false;
   }
   if ("activeSceneId" in body) {
-    if (body.activeSceneId !== null) await getScene(db, userId, validateSceneId(body.activeSceneId));
+    if (body.activeSceneId !== null) {
+      if (options?.tier === "free") {
+        throw new SceneTierError("Private cloud scenes require the Selected tier or higher.");
+      }
+      await getScene(db, userId, validateSceneId(body.activeSceneId));
+    }
     changes.active_scene_id = body.activeSceneId;
     changes.preset = null;
   }
@@ -157,7 +188,10 @@ export async function getSceneImagePublic(db: SupabaseClient, id: string, thumbn
   if (!data) throw new SceneError("Scene image unavailable.", 404);
   return data;
 }
-export async function getSceneImage(db: SupabaseClient, userId: string, id: string, thumbnail: boolean): Promise<Blob> {
+export async function getSceneImage(db: SupabaseClient, userId: string, id: string, thumbnail: boolean, options?: SceneStoreOptions): Promise<Blob> {
+  if (options?.tier === "free") {
+    throw new SceneTierError("Private cloud scenes require the Selected tier or higher.");
+  }
   const scene = await getScene(db, userId, id);
   if (scene.storage_provider === "r2") return getR2Image(objectKeys(scene.image_key)[thumbnail ? 1 : 0]);
   const { data, error } = await db.storage.from(BUCKET).download(objectKeys(scene.image_key)[thumbnail ? 1 : 0]); check(error);

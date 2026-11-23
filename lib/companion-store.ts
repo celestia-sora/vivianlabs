@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { decayCompanionState, type CompanionState, defaultCompanionState, normalizeMood, clampScore } from "@/lib/companion";
 
@@ -25,11 +26,23 @@ function fromRow(row: Row): CompanionState {
   };
 }
 
-export async function loadCompanionState(userKey: string): Promise<CompanionState> {
+export function normalizeCompanionUserKey(userKey: string): string {
+  const trimmed = userKey.trim();
+  if (!trimmed) throw new Error("A companion identity is required");
+  return trimmed;
+}
+
+export async function loadCompanionState(userKey: string, db?: SupabaseClient): Promise<CompanionState> {
   const fallback = defaultCompanionState();
+  const ownerKey = userKey.trim();
+  if (!ownerKey) return fallback;
   try {
-    const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase.from("companion_state").select("affinity,trust,familiarity,mood,mood_intensity,conversation_summary,last_idle_at,last_interaction_at").eq("user_key", userKey).maybeSingle();
+    const supabase = db ?? getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("companion_state")
+      .select("affinity,trust,familiarity,mood,mood_intensity,conversation_summary,last_idle_at,last_interaction_at")
+      .eq("user_key", ownerKey)
+      .maybeSingle();
     if (error || !data) return fallback;
     return decayCompanionState(fromRow(data as Row));
   } catch (error) {
@@ -38,11 +51,13 @@ export async function loadCompanionState(userKey: string): Promise<CompanionStat
   }
 }
 
-export async function saveCompanionState(userKey: string, state: CompanionState) {
+export async function saveCompanionState(userKey: string, state: CompanionState, db?: SupabaseClient) {
+  const ownerKey = userKey.trim();
+  if (!ownerKey) return;
   try {
-    const supabase = getSupabaseAdmin();
+    const supabase = db ?? getSupabaseAdmin();
     await supabase.from("companion_state").upsert({
-      user_key: userKey,
+      user_key: ownerKey,
       affinity: state.affinity,
       trust: state.trust,
       familiarity: state.familiarity,
@@ -56,4 +71,27 @@ export async function saveCompanionState(userKey: string, state: CompanionState)
   } catch (error) {
     console.warn("Companion state save unavailable", error);
   }
+}
+
+export async function loadMemorySummary(userKey: string, db?: SupabaseClient): Promise<string> {
+  const ownerKey = normalizeCompanionUserKey(userKey);
+  const supabase = db ?? getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("companion_state")
+    .select("memory_summary")
+    .eq("user_key", ownerKey)
+    .maybeSingle();
+  if (error) throw error;
+  return typeof data?.memory_summary === "string" ? data.memory_summary : "";
+}
+
+export async function saveMemorySummary(userKey: string, summary: string, db?: SupabaseClient): Promise<void> {
+  const ownerKey = normalizeCompanionUserKey(userKey);
+  const supabase = db ?? getSupabaseAdmin();
+  const { error } = await supabase.from("companion_state").upsert({
+    user_key: ownerKey,
+    memory_summary: summary.trim().slice(0, 2000),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_key" });
+  if (error) throw error;
 }

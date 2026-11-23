@@ -5,12 +5,14 @@ export const STORAGE_BUDGET_BYTES = STORAGE_CAPACITY_BYTES - STORAGE_BUFFER_BYTE
 // Categories are a breakdown of the same shared budget, never additive quotas.
 export const STORAGE_LIMITS = { live2d: STORAGE_BUDGET_BYTES, other: STORAGE_BUDGET_BYTES } as const;
 export const MODEL_MAX_BYTES = 512 * 1024 * 1024;
+export const SELECTED_USER_STORAGE_LIMIT_BYTES = 512 * 1024 * 1024;
 export const MODEL_PART_BYTES = 16 * 1024 * 1024;
 export type StorageCategory = keyof typeof STORAGE_LIMITS;
 export interface StorageUsage { live2d: { used: number; limit: number }; other: { used: number; limit: number } }
+export interface PersonalStorageUsage { used: number; limit: number | null }
 export interface CloudModel { id: string; byteSize: number; manifests: Array<{ path: string; name: string }>; expressionPreferences?: Record<string, string[]>; scope?: "private" | "shared" }
 export class StorageError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, public status = 400, public code?: string) { super(message); }
 }
 export function storageId(value: unknown): string {
   if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new StorageError("Invalid storage ID.");
@@ -19,6 +21,18 @@ export function storageId(value: unknown): string {
 export function modelSize(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > MODEL_MAX_BYTES) throw new StorageError("Each model must be at most 512 MiB.");
   return value;
+}
+export function assertUserStorageWithinCap(usedBytes: number, incomingBytes: number, capBytes = SELECTED_USER_STORAGE_LIMIT_BYTES): void {
+  if (!Number.isSafeInteger(usedBytes) || usedBytes < 0 || !Number.isSafeInteger(incomingBytes) || incomingBytes < 0) {
+    throw new StorageError("Storage usage could not be verified.", 503);
+  }
+  if (usedBytes + incomingBytes > capBytes) {
+    throw new StorageError(
+      "Personal R2 storage limit reached (512 MiB). Delete unused files before uploading.",
+      403,
+      "STORAGE_QUOTA_EXCEEDED",
+    );
+  }
 }
 export function partSize(bytes: number, part: number): number {
   if (!Number.isInteger(part) || part < 1 || part > Math.ceil(bytes / MODEL_PART_BYTES)) throw new StorageError("Invalid upload part.");

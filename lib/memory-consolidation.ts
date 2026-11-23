@@ -16,7 +16,11 @@ import {
   type V2MemoryRow,
 } from "@/lib/memory-v2";
 
-const userKey = "default";
+function normalizeUserKey(userKey: string): string {
+  const trimmed = userKey.trim();
+  if (!trimmed) throw new Error("A companion identity is required");
+  return trimmed;
+}
 
 export type ConsolidationStats = {
   ok: boolean;
@@ -42,13 +46,15 @@ export type MemoryWriteResult = "inserted" | "duplicate-bumped" | "contradiction
 export async function writeMemoryItem(
   supabase: SupabaseClient,
   item: ExtractedItem,
+  userKey = "default",
 ): Promise<MemoryWriteResult> {
+  const ownerKey = normalizeUserKey(userKey);
   const { isSecretLike } = await import("@/lib/memory-v2");
   if (isSecretLike(item.memory)) {
     bumpCounter("secret_prefilter_hits");
     return "secret-blocked";
   }
-  const candidateRows = await loadCandidates(supabase, item.type);
+  const candidateRows = await loadCandidates(supabase, item.type, ownerKey);
   if (candidateRows === null) return "skipped";
   const decision = classifyWrite(item, candidateRows);
   const now = new Date().toISOString();
@@ -68,14 +74,14 @@ export async function writeMemoryItem(
       last_used_at: now,
       access_count: (matched.access_count ?? 0) + 1,
       updated_at: now,
-    }).eq("user_key", userKey).eq("id", matched.id);
+    }).eq("user_key", ownerKey).eq("id", matched.id);
     if (error) return "skipped";
     return "duplicate-bumped";
   }
   if (decision.action === "contradiction") {
     bumpCounter("supersede_hits");
     const inserted = await supabase.from("memories").insert({
-      user_key: userKey,
+      user_key: ownerKey,
       memory: item.memory.trim(),
       category: item.category,
       importance: item.importance,
@@ -90,12 +96,12 @@ export async function writeMemoryItem(
     const { error } = await supabase.from("memories").update({
       superseded_by: inserted.data.id,
       updated_at: now,
-    }).eq("user_key", userKey).eq("id", decision.matchedId);
+    }).eq("user_key", ownerKey).eq("id", decision.matchedId);
     if (error) return "skipped";
     return "contradiction-superseded";
   }
   const { error } = await supabase.from("memories").insert({
-    user_key: userKey,
+    user_key: ownerKey,
     memory: item.memory.trim(),
     category: item.category,
     importance: item.importance,
@@ -110,11 +116,11 @@ export async function writeMemoryItem(
   return "inserted";
 }
 
-async function loadCandidates(supabase: SupabaseClient, type: string): Promise<V2MemoryRow[] | null> {
+async function loadCandidates(supabase: SupabaseClient, type: string, ownerKey: string): Promise<V2MemoryRow[] | null> {
   const { data, error } = await supabase
     .from("memories")
     .select("id,memory,category,type,importance,importance_01,superseded_by,source_message_ids,access_count,last_accessed_at,last_used_at,updated_at,created_at")
-    .eq("user_key", userKey)
+    .eq("user_key", ownerKey)
     .eq("type", type)
     .is("superseded_by", null)
     .limit(60);
@@ -123,11 +129,12 @@ async function loadCandidates(supabase: SupabaseClient, type: string): Promise<V
 }
 
 /**
- * On-demand consolidation. Single-flight lease via memory_consolidation_runs,
+ * On-demand consolidation. Single-flight lease per user via memory_consolidation_runs,
  * idempotent steps, hard caps, never deletes rows (superseded_by only).
  * Failed runs mark status=failed and change nothing visible.
  */
-export async function runConsolidation(supabase: SupabaseClient): Promise<ConsolidationStats> {
+export async function runConsolidation(supabase: SupabaseClient, userKey = "default"): Promise<ConsolidationStats> {
+  const ownerKey = normalizeUserKey(userKey);
   const started = Date.now();
   const stats: ConsolidationStats = {
     ok: false,
@@ -144,6 +151,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
     const { data: running } = await supabase
       .from("memory_consolidation_runs")
       .select("id,started_at,status")
+      .eq("user_key", ownerKey)
       .eq("status", "running")
       .order("started_at", { ascending: false })
       .limit(1)
@@ -154,7 +162,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
     }
     const inserted = await supabase
       .from("memory_consolidation_runs")
-      .insert({ status: "running", stats })
+      .insert({ user_key: ownerKey, status: "running", stats })
       .select("id")
       .single();
     if (inserted.error || !inserted.data) {
@@ -167,7 +175,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
     const { data, error } = await supabase
       .from("memories")
       .select("id,memory,category,type,importance,importance_01,superseded_by,last_accessed_at,last_used_at,updated_at,created_at,embedding,embedding_model")
-      .eq("user_key", userKey)
+      .eq("user_key", ownerKey)
       .is("superseded_by", null)
       .order("updated_at", { ascending: false })
       .limit(CONSOLIDATION_ITEM_CAP * 2);
@@ -189,7 +197,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
       // Drop expired moods: supersede to a tombstone row instead of deleting.
       if (isExpiredMood(row, started)) {
         const tombstone = await supabase.from("memories").insert({
-          user_key: userKey,
+          user_key: ownerKey,
           memory: `mood expired (${row.id})`,
           category: "general",
           importance: 1,
@@ -199,7 +207,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
         }).select("id").single();
         if (!tombstone.error && tombstone.data) {
           await supabase.from("memories").update({ superseded_by: tombstone.data.id, updated_at: nowIso })
-            .eq("user_key", userKey).eq("id", row.id);
+            .eq("user_key", ownerKey).eq("id", row.id);
           stats.expiredMoodsDropped += 1;
         }
         continue;
@@ -211,7 +219,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
           importance: importanceToLegacy(decayed),
           importance_01: decayed,
           updated_at: nowIso,
-        }).eq("user_key", userKey).eq("id", row.id);
+        }).eq("user_key", ownerKey).eq("id", row.id);
         if (!decayError) stats.decayed += 1;
         continue;
       }
@@ -232,9 +240,9 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
           importance_01: bumped,
           last_accessed_at: nowIso,
           updated_at: nowIso,
-        }).eq("user_key", userKey).eq("id", newer.id);
+        }).eq("user_key", ownerKey).eq("id", newer.id);
         const tombstone = await supabase.from("memories").insert({
-          user_key: userKey,
+          user_key: ownerKey,
           memory: `consolidated duplicate (${older.id})`,
           category: "general",
           importance: 1,
@@ -244,7 +252,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
         }).select("id").single();
         if (!tombstone.error && tombstone.data) {
           await supabase.from("memories").update({ superseded_by: tombstone.data.id, updated_at: nowIso })
-            .eq("user_key", userKey).eq("id", older.id);
+            .eq("user_key", ownerKey).eq("id", older.id);
           stats.mergedDuplicates += 1;
           processed += 1;
         }
@@ -265,7 +273,7 @@ export async function runConsolidation(supabase: SupabaseClient): Promise<Consol
           status: stats.ok ? "done" : "failed",
           finished_at: new Date().toISOString(),
           stats,
-        }).eq("id", runId);
+        }).eq("user_key", ownerKey).eq("id", runId);
       } catch {
         // Lease-row finalization never blocks chat.
       }

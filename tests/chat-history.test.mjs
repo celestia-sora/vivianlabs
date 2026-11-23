@@ -24,6 +24,61 @@ test("write validation rejects forged roles, unstable IDs, duplicate IDs and exc
   assert.equal(store.validateHistoryWrite(valid).id, id);
   for (const body of [null, { ...valid, id: "daily-talk" }, { ...valid, create: undefined }, { ...valid, messages: [{ ...msg, from: "system" }] }, { ...valid, messages: [msg, msg] }, { ...valid, messages: [{ ...msg, text: "a".repeat(16001) }] }, { ...valid, messages: [{ ...msg, timestamp: "invalid" }] }]) assert.throws(() => store.validateHistoryWrite(body));
 });
+test("chat history store scopes save, list, read, and delete by userKey", async () => {
+  const conversations = [];
+  const messages = [];
+  const db = {
+    async rpc(name, args) {
+      assert.equal(name, "vivian_save_conversation");
+      const existing = conversations.find((c) => c.id === args.p_id);
+      if (!existing) {
+        if (!args.p_create) return { error: { code: "P0002" } };
+        conversations.push({ id: args.p_id, user_key: args.p_user_key, title: args.p_title, updated_at: "2026-11-23T00:00:00Z" });
+      } else if (existing.user_key !== args.p_user_key) {
+        return { error: { code: "42501" } };
+      }
+      for (const m of args.p_messages) {
+        messages.push({ id: messages.length + 1, conversation_id: args.p_id, client_message_id: m.id, role: m.role, content: m.content, created_at: m.created_at });
+      }
+      return { error: null };
+    },
+    from(table) {
+      const filters = [];
+      let action = "select";
+      let single = false;
+      const q = {
+        select() { return q; },
+        delete() { action = "delete"; return q; },
+        eq(k, v) { filters.push((r) => r[k] === v); return q; },
+        gt(k, v) { filters.push((r) => Number(r[k]) > Number(v)); return q; },
+        order() { return q; },
+        range() { return q; },
+        limit() { return q; },
+        maybeSingle() { single = true; return q; },
+        then(resolve, reject) {
+          const list = table === "conversations" ? conversations : messages;
+          const matched = list.filter((r) => filters.every((f) => f(r)));
+          if (action === "delete") {
+            for (const row of matched) list.splice(list.indexOf(row), 1);
+            return Promise.resolve({ error: null }).then(resolve, reject);
+          }
+          return Promise.resolve({ data: single ? matched[0] ?? null : matched, error: null }).then(resolve, reject);
+        },
+      };
+      return q;
+    },
+  };
+
+  await store.saveHistory(db, { id, title: "User A Chat", messages: [msg], create: true }, "user-a");
+  assert.equal((await store.listHistory(db, 0, "user-a")).conversations.length, 1);
+  assert.equal((await store.listHistory(db, 0, "user-b")).conversations.length, 0);
+  await assert.rejects(() => store.readHistory(db, id, "0", "user-b"), (err) => err.status === 404);
+  await assert.rejects(() => store.saveHistory(db, { id, title: "Hijack", messages: [msg], create: true }, "user-b"), (err) => err.status === 404);
+  await store.deleteHistory(db, id, "user-b");
+  assert.equal(conversations.length, 1);
+  await store.deleteHistory(db, id, "user-a");
+  assert.equal(conversations.length, 0);
+});
 test("cloud loader follows conversation and message cursors past the first page", async () => {
   const calls = [];
   const client = load("../lib/chat-history-client.ts", { "@/lib/auth/fetch": { authFetch: async (url) => {
