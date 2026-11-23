@@ -11,9 +11,10 @@ const source = ts.transpileModule(readFileSync(new URL("../app/api/tts/route.ts"
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function handler(fetch, denied = null, payload = { text: "สวัสดีค่ะ", language: "th" }) {
+function handler(fetch, denied = null, payload = { text: "สวัสดีค่ะ", language: "th" }, user = { id: "user-tts-1", email: "tts@example.com" }) {
   const exports = {};
   const logs = [];
+  const voiceLookups = [];
   runInNewContext(source, {
     exports, fetch, Error,
     // Use fixture credentials only; do not read or contact production providers.
@@ -21,16 +22,25 @@ function handler(fetch, denied = null, payload = { text: "สวัสดีค�
     AbortSignal: { timeout(ms) { assert.equal(ms, 14000); return AbortSignal.timeout(15); } },
     console: { warn: (...args) => logs.push(args), info: (...args) => logs.push(args) },
     require(name) {
-      if (name === "@/lib/auth/server") return { requireApiAccess: async () => denied };
+      if (name === "@/lib/auth/server") return { requireAuthorizedUser: async () => denied ? { user: null, denied } : { user, denied: null } };
       if (name === "@/lib/rate-limit") return { rateLimit: () => ({ allowed: true }) };
       if (name === "@/lib/speech") return speech;
+      if (name === "@/lib/elevenlabs-voice") {
+        return {
+          normalizeSpeechLanguage: (l) => (["global", "th", "en", "ja", "ko", "zh"].includes(l) ? l : "global"),
+          resolveElevenLabsVoiceId: async (reqVoiceId, userId) => {
+            voiceLookups.push({ reqVoiceId, userId });
+            return (typeof reqVoiceId === "string" && reqVoiceId.trim()) || "fixture-voice";
+          },
+        };
+      }
       if (name === "next/server") return require("next/server");
       throw new Error(`Unexpected import: ${name}`);
     },
   });
   return { post: () => exports.POST(new Request("https://vivian.example/api/tts", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  })), logs };
+  })), logs, voiceLookups };
 }
 
 function interruptedAudio(error) {
@@ -112,5 +122,6 @@ test("actual ElevenLabs payload preserves tags from multiple v4 categories with 
     return new Response(new Uint8Array([73, 68, 51]));
   }, null, { text, language: "th" });
   assert.equal((await fixture.post()).status, 200);
+  assert.deepEqual(fixture.voiceLookups, [{ reqVoiceId: undefined, userId: "user-tts-1" }]);
   assert.equal(text, "(กอดอก) [tired] ราคา 1,250 บาท [chuckling] ลด 15% [whispering] ด- ด- เดี๋ยว! [keyboard typing]");
 });

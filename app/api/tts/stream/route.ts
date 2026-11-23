@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiAccess } from "@/lib/auth/server";
+import { requireAuthorizedUser } from "@/lib/auth/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { hasStandaloneAudioEventTag, speechText, speechTextWithAudioTags } from "@/lib/speech";
 import { normalizeSpeechLanguage, resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
@@ -8,9 +8,9 @@ import { StreamingTtsSession } from "@/lib/tts-stream-session";
 export const maxDuration = 30;
 
 export async function POST(request: Request): Promise<Response> {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
-  const quota = rateLimit(request, "tts", 30);
+  const quota = rateLimit(request, `tts:${user.id}`, 30);
   if (!quota.allowed) return rateLimitedResponse(quota.retryAfter);
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -36,7 +36,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId);
+  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId, user.id);
   if (!effectiveVoiceId) {
     return NextResponse.json(
       { error: "ELEVENLABS_VOICE_ID is not configured and no voiceId provided", status: 500 },

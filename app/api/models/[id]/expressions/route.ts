@@ -5,8 +5,9 @@ import { storageJson } from "@/lib/cloud-storage";
 export const runtime = "nodejs";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  return cloudApi(request, async (db, userId) => {
+  return cloudApi(request, async (db, userId, tier) => {
     const { id } = await params;
-    return Response.json(await saveCloudModelExpressions(db, userId, id, await storageJson(request)));
+    const input = tier === "free" ? {} : await storageJson(request);
+    return Response.json(await saveCloudModelExpressions(db, userId, id, input, { tier }));
   });
 }

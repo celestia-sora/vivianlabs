@@ -1,8 +1,8 @@
-import { requireApiAccess } from "@/lib/auth/server";
+import { requireAuthorizedUser } from "@/lib/auth/server";
 import { NextResponse } from "next/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { hasStandaloneAudioEventTag, speechText, speechTextWithAudioTags } from "@/lib/speech";
-import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeSpeechLanguage, resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
 
 export const maxDuration = 30;
 
@@ -11,13 +11,12 @@ export const maxDuration = 30;
 const upstreamTimeoutMs = 14_000;
 
 export async function POST(request: Request): Promise<Response> {
-  const denied = await requireApiAccess(request);
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
-  const quota = rateLimit(request, "tts", 30);
+  const quota = rateLimit(request, `tts:${user.id}`, 30);
   if (!quota.allowed) return rateLimitedResponse(quota.retryAfter);
   const startedAt = Date.now();
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  const envVoiceId = process.env.ELEVENLABS_VOICE_ID;
   if (!apiKey) return NextResponse.json({ error: "ELEVENLABS_API_KEY is not configured" }, { status: 500 });
 
   let body: unknown;
@@ -27,24 +26,10 @@ export async function POST(request: Request): Promise<Response> {
   const { text, language, voiceId: reqVoiceId } = body as Record<string, unknown>;
   if (typeof text !== "string" || text.length > 5000) return NextResponse.json({ error: "Text is required and must be under 5000 characters", status: 400 }, { status: 400 });
 
-  let effectiveVoiceId = (typeof reqVoiceId === "string" && reqVoiceId.trim()) ? reqVoiceId.trim() : "";
-  if (!effectiveVoiceId) {
-    try {
-      const db = getSupabaseAdmin(AbortSignal.timeout(3000));
-      const res = await db.from("vivian_voice_preferences").select("voice_id").eq("id", "global").maybeSingle();
-      if (res.data?.voice_id && typeof res.data.voice_id === "string") {
-        effectiveVoiceId = res.data.voice_id.trim();
-      }
-    } catch {
-      // Fallback to env
-    }
-  }
-  if (!effectiveVoiceId) {
-    effectiveVoiceId = envVoiceId || "";
-  }
+  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId, user.id);
   if (!effectiveVoiceId) return NextResponse.json({ error: "ELEVENLABS_VOICE_ID is not configured and no voiceId provided", status: 500 }, { status: 500 });
 
-  const speechLanguage = language === "global" || language === "en" || language === "ja" || language === "ko" || language === "zh" || language === "th" ? language : "global";
+  const speechLanguage = normalizeSpeechLanguage(language);
   const cleanText = speechText(text, speechLanguage);
   const taggedText = speechTextWithAudioTags(text, speechLanguage);
   if (!cleanText && !hasStandaloneAudioEventTag(taggedText)) return NextResponse.json({ error: "Text must contain spoken words or a supported non-verbal audio tag", status: 400 }, { status: 400 });

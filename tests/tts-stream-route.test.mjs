@@ -128,7 +128,7 @@ test("POST /api/tts/stream validates input and streams audio chunks via ElevenLa
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
   ).outputText;
 
-  function makeHandler({ denied = null, voiceId = "fixture-voice" } = {}) {
+  function makeHandler({ denied = null, voiceId = "fixture-voice", user = { id: "user-stream-1", email: "stream@example.com" }, voiceLookups = [] } = {}) {
     const exports = {};
     runInNewContext(routeSource, {
       exports,
@@ -138,10 +138,16 @@ test("POST /api/tts/stream validates input and streams audio chunks via ElevenLa
       crypto: require("node:crypto").webcrypto,
       process: { env: { ELEVENLABS_API_KEY: "fixture-key", ELEVENLABS_VOICE_ID: voiceId } },
       require(name) {
-        if (name === "@/lib/auth/server") return { requireApiAccess: async () => denied };
+        if (name === "@/lib/auth/server") return { requireAuthorizedUser: async () => denied ? { user: null, denied } : { user, denied: null } };
         if (name === "@/lib/rate-limit") return { rateLimit: () => ({ allowed: true }), rateLimitedResponse: () => Response.json({}, { status: 429 }) };
         if (name === "@/lib/speech") return speech;
-        if (name === "@/lib/elevenlabs-voice") return { normalizeSpeechLanguage: (l) => (l === "th" ? "th" : "global"), resolveElevenLabsVoiceId: async () => voiceId };
+        if (name === "@/lib/elevenlabs-voice") return {
+          normalizeSpeechLanguage: (l) => (l === "th" ? "th" : "global"),
+          resolveElevenLabsVoiceId: async (reqVoiceId, userId) => {
+            voiceLookups.push({ reqVoiceId, userId });
+            return voiceId;
+          },
+        };
         if (name === "@/lib/tts-stream-session") {
           return {
             StreamingTtsSession: class extends StreamingTtsSession {
@@ -176,7 +182,8 @@ test("POST /api/tts/stream validates input and streams audio chunks via ElevenLa
   const deniedRes = Response.json({ code: "AUTH_REQUIRED" }, { status: 401 });
   assert.equal(await makeHandler({ denied: deniedRes })({ text: "สวัสดีค่ะ" }), deniedRes);
 
-  const post = makeHandler();
+  const voiceLookups = [];
+  const post = makeHandler({ voiceLookups });
   const emptyRes = await post({ text: "(หลบตา)", language: "th" });
   assert.equal(emptyRes.status, 400);
 
@@ -185,6 +192,7 @@ test("POST /api/tts/stream validates input and streams audio chunks via ElevenLa
 
   const okRes = await post({ text: "[playful] ราคา 15 บาทค่ะ!", language: "th", turnId: "stream-turn-1" });
   assert.equal(okRes.status, 200);
+  assert.equal(voiceLookups.at(-1)?.userId, "user-stream-1");
   assert.equal(okRes.headers.get("content-type"), "application/x-ndjson");
   const lines = (await okRes.text()).trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(lines.some((e) => e.event === "audio_chunk" && e.turnId === "stream-turn-1" && e.format === "pcm_24000"), true);

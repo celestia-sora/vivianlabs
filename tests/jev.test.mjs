@@ -219,7 +219,7 @@ for (const phase of ["headers", "body"]) {
 
 // Exercise the actual chat route, JEV client, parser and plan; mock only auth,
 // persistence and upstream services. Never send test messages to cloud memory.
-function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, geminiReply, timeout = 2000, sceneContext = null, sceneFailure = false, sceneExecutionFailure = false } = {}) {
+function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, geminiReply, timeout = 2000, sceneContext = null, sceneFailure = false, sceneExecutionFailure = false, user = { id: "fixture-user", email: "fixture@example.com" } } = {}) {
   const calls = [], background = [], memoryLoads = [];
   const providerEnv = { TYPESAFE_API_KEY: "fixture-jev", GROQ_API_KEY: "fixture-groq", GEMINI_API_KEY: "fixture-gemini", SUPABASE_URL: "fixture-db", SUPABASE_SERVICE_ROLE_KEY: "fixture-admin", ...env };
   const fixtureJev = client(async (url, options) => {
@@ -228,12 +228,25 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
   }, providerEnv, timeout).module;
   const fixturePlan = load("../lib/chat-decision.ts", { "@/lib/tools": tools, "@/lib/jev": fixtureJev, "@/lib/scenes": scenes });
   const fixtureTools = load("../lib/tools.ts", {}, { process: { env: {} }, fetch: async () => assert.fail("Unexpected live local tool request") });
+  const policy = load("../lib/auth/policy.ts");
+  const userTiers = load("../lib/user-tiers.ts", { "./auth/policy.ts": policy });
   const imports = {
     "@/lib/scene-store": {
       loadSceneContext: async () => { if (sceneFailure) throw new Error("Storage offline"); return sceneContext; },
       executeSceneDecision: async (_context, decision) => { if (sceneExecutionFailure) throw new Error("Storage offline"); return decision ?? { change: false }; },
     },
-    "@/lib/auth/server": { requireApiAccess: async () => denied },
+    "@/lib/auth/server": {
+      requireAuthorizedUser: async () => denied ? { user: null, denied } : { user, denied: null },
+    },
+    "@/lib/auth/policy": policy,
+    "@/lib/user-tiers": {
+      ...userTiers,
+      assertAndConsumeChatQuota: async (_db, _user, options) => {
+        assert.equal(options?.mode, "chat");
+        return { allowed: true, tier: "selected", used: 1, limit: 20, remaining: 19, usageDate: "2026-11-23", resetAt: "2026-11-23T17:00:00.000Z" };
+      },
+      refundChatQuota: async () => true,
+    },
     "@/lib/rate-limit": { rateLimit: () => ({ allowed: true }) },
     "@/lib/companion": companion,
     "@/lib/vivian-story": story,
@@ -268,6 +281,7 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "next/server": { ...require("next/server"), after: (callback) => background.push(callback) },
   };
   const route = load("../app/api/chat/route.ts", imports, {
+    crypto: require("node:crypto").webcrypto,
     process: { env: providerEnv },
     fetch: async (url, options) => {
       const body = JSON.parse(options.body);

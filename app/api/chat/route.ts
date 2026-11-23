@@ -1,7 +1,17 @@
 import { readProviderStream, timedChatResponse, type ChatStreamControl, type TokenTiming } from "@/lib/chat-stream";
 import { historyUuid } from "@/lib/chat-history";
 import { saveHistory } from "@/lib/chat-history-store";
-import { requireApiAccess } from "@/lib/auth/server";
+import { requireAuthorizedUser, type AuthUser } from "@/lib/auth/server";
+import { isSorachanEmail } from "@/lib/auth/policy";
+import {
+  assertAndConsumeChatQuota,
+  bangkokDateKey,
+  nextBangkokMidnightIso,
+  refundChatQuota,
+  TierError,
+  tierErrorResponse,
+  type ChatQuotaStatus,
+} from "@/lib/user-tiers";
 import { after, NextResponse } from "next/server";
 import { applyConversationTurn, companionPromptBlock, type CompanionState } from "@/lib/companion";
 import { vivianPersonaPrompt, vivianTurnPrompt } from "@/lib/vivian-persona";
@@ -51,7 +61,6 @@ type ProviderTurn = {
 
 export const maxDuration = 60;
 
-const userKey = "default";
 const groqModelName = () => process.env.GROQ_MODEL ?? "qwen/qwen3.8-27b";
 const groqMemoryModelName = () => process.env.GROQ_MEMORY_MODEL ?? "openai/gpt-oss-20b";
 const groqVisionModel = () => process.env.GROQ_VISION_MODEL ?? "qwen/qwen3.8-27b";
@@ -392,25 +401,45 @@ ${summary ? `\n\nบริบทสรุปจากบทสนทนาก่
 ${memoryContext}${toolContext}`;
 }
 
+type ChatRequestBody = {
+  messages?: ChatMessage[];
+  conversationId?: string;
+  conversationTitle?: string;
+  conversationCreate?: boolean;
+  userMessageId?: string;
+  assistantMessageId?: string;
+  mode?: "chat";
+  image?: string;
+  interrupted?: boolean;
+  character?: string;
+  personality?: string;
+  characterName?: string;
+  language?: string;
+  streamAudio?: boolean;
+  voiceId?: string;
+  turnId?: string;
+};
+
+type PreparedChatRequest = {
+  body: ChatRequestBody;
+  hasImage: boolean;
+  inputMessages: ChatMessage[];
+  recent: ChatMessage[];
+  older: ChatMessage[];
+  contents: ProviderMessage[];
+  supabase: ReturnType<typeof getSupabaseAdmin> | null;
+  chatQuota: ChatQuotaStatus;
+  groqApiKey: string | undefined;
+  geminiApiKey: string | undefined;
+};
+
 export async function POST(request: Request) {
   const requestStarted = Date.now();
-  let authenticatedUserId: string | null = null;
-  const denied = await requireApiAccess(request, (user) => { authenticatedUserId = user.id; });
+  const { user, denied } = await requireAuthorizedUser(request);
   if (denied) return denied;
-  const quota = rateLimit(request, "chat", 20);
+  const quota = rateLimit(request, `chat:${user.id}`, 20);
   if (!quota.allowed) return rateLimitedResponse(quota.retryAfter);
-  return request.headers.get("accept")?.includes("application/x-ndjson")
-    ? timedChatResponse((firstToken, streamControl) => chatReply(request, authenticatedUserId, requestStarted, firstToken, streamControl))
-    : chatReply(request, authenticatedUserId, requestStarted);
-}
 
-async function chatReply(
-  request: Request,
-  authenticatedUserId: string | null,
-  requestStarted: number,
-  firstToken?: (provider: string, timing?: TokenTiming) => void,
-  streamControl?: ChatStreamControl,
-) {
   const groqApiKey = process.env.GROQ_API_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!groqApiKey && !geminiApiKey) {
@@ -418,36 +447,97 @@ async function chatReply(
     return NextResponse.json({ error: "ตอนนี้ระบบแชตยังไม่พร้อมใช้งานค่ะ", code: "CHAT_NOT_CONFIGURED" }, { status: 503 });
   }
 
-  const body = (await request.json()) as {
-    messages?: ChatMessage[];
-    conversationId?: string;
-    conversationTitle?: string;
-    conversationCreate?: boolean;
-    userMessageId?: string;
-    assistantMessageId?: string;
-    mode?: "chat";
-    image?: string;
-    interrupted?: boolean;
-    character?: string;
-    personality?: string;
-    characterName?: string;
-    language?: string;
-    streamAudio?: boolean;
-    voiceId?: string;
-    turnId?: string;
+  let body: ChatRequestBody;
+  try {
+    body = (await request.json()) as ChatRequestBody;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body", status: 400 }, { status: 400 });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Invalid request body", status: 400 }, { status: 400 });
+  }
+
+  const hasImage = typeof body.image === "string" && body.image.length > 50;
+  if (body.conversationId !== undefined && (!historyUuid(body.conversationId) || !historyUuid(body.userMessageId) || !historyUuid(body.assistantMessageId) || typeof body.conversationCreate !== "boolean")) {
+    return NextResponse.json({ error: "Invalid conversation identity", status: 400 }, { status: 400 });
+  }
+  const inputMessages = (Array.isArray(body.messages) ? body.messages : []).filter((message) => message && typeof message.content === "string" && message.content.trim());
+  const { recent, older } = trimHistory(inputMessages);
+  const contents = mergeRoles(recent);
+  if (!contents.length && !hasImage) {
+    return NextResponse.json({ error: "กรุณาพิมพ์ข้อความหรือส่งรูปภาพก่อนค่ะ" }, { status: 400 });
+  }
+
+  // Always enforce daily chat quota with mode: "chat" (never trust client body.mode).
+  let supabase: ReturnType<typeof getSupabaseAdmin> | null = null;
+  let chatQuota: ChatQuotaStatus;
+  try {
+    supabase = getSupabaseAdmin(AbortSignal.timeout(supabaseTimeoutMs));
+    chatQuota = await assertAndConsumeChatQuota(supabase, user, { mode: "chat" });
+  } catch (error) {
+    if (error instanceof TierError) return tierErrorResponse(error);
+    if (isSorachanEmail(user.email)) {
+      chatQuota = {
+        allowed: true,
+        tier: "sorachan",
+        used: 0,
+        limit: null,
+        remaining: null,
+        usageDate: bangkokDateKey(),
+        resetAt: nextBangkokMidnightIso(),
+      };
+    } else {
+      return tierErrorResponse(new TierError("Could not verify daily chat quota.", 503, "TIER_UNAVAILABLE"));
+    }
+  }
+
+  const prepared: PreparedChatRequest = {
+    body,
+    hasImage,
+    inputMessages,
+    recent,
+    older,
+    contents,
+    supabase,
+    chatQuota,
+    groqApiKey,
+    geminiApiKey,
   };
+
+  return request.headers.get("accept")?.includes("application/x-ndjson")
+    ? timedChatResponse((firstToken, streamControl) => chatReply(request, user, prepared, requestStarted, firstToken, streamControl))
+    : chatReply(request, user, prepared, requestStarted);
+}
+
+async function chatReply(
+  request: Request,
+  user: AuthUser,
+  prepared: PreparedChatRequest,
+  requestStarted: number,
+  firstToken?: (provider: string, timing?: TokenTiming) => void,
+  streamControl?: ChatStreamControl,
+) {
+  const { body, hasImage, inputMessages, recent, older, contents, supabase: quotaDb, chatQuota, groqApiKey, geminiApiKey } = prepared;
+  const userKey = user.id;
+  let replyEmitted = false;
+  let activeTtsSession: StreamingTtsSession | null = null;
+  const abortTtsAttempt = (session: StreamingTtsSession | null) => {
+    if (!session) return;
+    session.abort(true);
+    if (activeTtsSession === session) activeTtsSession = null;
+  };
+  const refundIfNeeded = async () => {
+    if (replyEmitted || chatQuota.limit === null || !quotaDb) return;
+    await refundChatQuota(quotaDb, userKey, chatQuota.usageDate).catch(() => false);
+  };
+
+  try {
   const character: CharacterKey = "Miss";
   const personality = body.personality === "shy" || body.personality === "playful" || body.personality === "elegant" ? body.personality : "custom";
   const characterName = typeof body.characterName === "string" && body.characterName.trim() ? body.characterName.trim().slice(0, 40) : "Vivian";
   const language = body.language === "global" || body.language === "en" || body.language === "ja" || body.language === "ko" || body.language === "zh" || body.language === "th" ? body.language : "global";
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
   const streamAudio = body.streamAudio === true && Boolean(streamControl) && Boolean(elevenLabsKey);
-  const hasImage = typeof body.image === "string" && body.image.length > 50;
-  if (body.conversationId !== undefined && (!historyUuid(body.conversationId) || !historyUuid(body.userMessageId) || !historyUuid(body.assistantMessageId) || typeof body.conversationCreate !== "boolean")) return NextResponse.json({ error: "Invalid conversation identity", status: 400 }, { status: 400 });
-  const inputMessages = (body.messages ?? []).filter((message) => message.content?.trim());
-  const { recent, older } = trimHistory(inputMessages);
-  const contents = mergeRoles(recent);
-  if (!contents.length && !hasImage) return NextResponse.json({ error: "กรุณาพิมพ์ข้อความหรือส่งรูปภาพก่อนค่ะ" }, { status: 400 });
 
   const lastUserText = ([...recent].reverse().find((message) => message.role === "user")?.content ?? (hasImage ? "ดูนี่สิ" : ""));
   // Non-critical presentation lookups have their own short deadline. Start
@@ -457,12 +547,11 @@ async function chatReply(
   // Never trust a client-supplied profile: switching accounts/devices must not
   // leak one account's preferences into another account's prompt.
   const customInstructionsPromise = (async () => {
-    if (!authenticatedUserId) return "";
     try {
       const { data, error } = await getSupabaseAdmin(AbortSignal.timeout(5000))
         .from("vivian_user_custom_instructions")
         .select("instructions")
-        .eq("user_id", authenticatedUserId)
+        .eq("user_id", userKey)
         .maybeSingle();
       if (error) throw error;
       return typeof data?.instructions === "string" ? data.instructions : "";
@@ -472,12 +561,12 @@ async function chatReply(
     }
   })();
   const effectiveVoiceIdPromise = streamAudio
-    ? resolveElevenLabsVoiceId(body.voiceId)
+    ? resolveElevenLabsVoiceId(body.voiceId, userKey)
     : Promise.resolve("");
   // Always load the scene catalog for chat turns, even when JEV is
   // disabled/unconfigured. The deterministic label match in chat-decision
   // needs the labels to switch by name ("คฤหาสน์") without JEV.
-  const sceneContext = await loadSceneContext(authenticatedUserId).catch(() => null);
+  const sceneContext = chatQuota.tier === "free" ? null : await loadSceneContext(userKey).catch(() => null);
   const decisionContext: JevContext = {
     message: lastUserText,
     recentTurns: recent.slice(0, -1).slice(-2),
@@ -574,6 +663,7 @@ async function chatReply(
   const promptContents: ProviderMessage[] = contents;
 
   if (shouldSearch && !geminiApiKey && !process.env.TAVILY_API_KEY) {
+    await refundIfNeeded();
     console.warn("Chat search unavailable", { code: "SEARCH_UNAVAILABLE", mode: "chat", hasImage });
     return NextResponse.json({ error: "ระบบค้นหาขัดข้อง ตอนนี้ใช้ไม่ได้", code: "SEARCH_UNAVAILABLE" }, { status: 503 });
   }
@@ -636,7 +726,6 @@ async function chatReply(
     ? body.turnId.trim().slice(0, 64)
     : crypto.randomUUID();
   let attemptCounter = 0;
-  let activeTtsSession: StreamingTtsSession | null = null;
   let sawDeltaForActiveAttempt = false;
   const startTtsAttempt = () => {
     if (!streamAudio || !elevenLabsKey || !effectiveVoiceId || !streamControl) return null;
@@ -649,11 +738,6 @@ async function chatReply(
       signal: request.signal,
       emit: streamControl.emit,
     });
-  };
-  const abortTtsAttempt = (session: StreamingTtsSession | null) => {
-    if (!session) return;
-    session.abort(true);
-    if (activeTtsSession === session) activeTtsSession = null;
   };
 
   // Vision route: Groq Qwen 3.8 27B only (GROQ_VISION_MODEL). No Gemini
@@ -801,6 +885,7 @@ async function chatReply(
 
   if (!generatedData) {
     abortTtsAttempt(activeTtsSession);
+    await refundIfNeeded();
     console.error("All chat providers failed");
     return NextResponse.json({ error: "ผู้ให้บริการตอบช้าหรือไม่พร้อมใช้งาน ลองใหม่อีกครั้งนะคะ" }, { status: 504 });
   }
@@ -822,6 +907,7 @@ async function chatReply(
   const text = removeEmoji(sources.length ? `${replyText}\n\nแหล่งข้อมูล:\n${sources.map((source: { title: string; uri: string }) => `- ${source.title}: ${source.uri}`).join("\n")}` : replyText);
   if (!text) {
     abortTtsAttempt(activeTtsSession);
+    await refundIfNeeded();
     return NextResponse.json({ error: "Chat provider returned no text" }, { status: 502 });
   }
 
@@ -840,7 +926,7 @@ async function chatReply(
           { id: body.userMessageId, from: "me", text: originalUserText.slice(0, 16000), timestamp },
           { id: body.assistantMessageId, from: "vivian", text: text.slice(0, 16000), timestamp },
         ],
-      }), supabaseTimeoutMs, "chat history save");
+      }, userKey), supabaseTimeoutMs, "chat history save");
       historySaved = true;
     } catch { console.warn("Chat history unavailable", { code: "HISTORY_UNAVAILABLE" }); }
   }
@@ -858,7 +944,8 @@ async function chatReply(
           const rows = [{ conversation_id: conversation.id, role: "user" as const, content: lastUserText }, { conversation_id: conversation.id, role: "assistant" as const, content: text }];
           await withTimeout(supabase.from("messages").insert(rows), supabaseTimeoutMs, "message insert");
           await withTimeout(supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversation.id), supabaseTimeoutMs, "conversation update");
-        }      }
+        }
+      }
       const shouldExtract = Boolean(groqApiKey) && lastUserText.length >= 12
         ? (memoryV2GateEnabled() ? true : memoryIntent.test(lastUserText))
         : false;
@@ -868,7 +955,7 @@ async function chatReply(
       if (memoryV2ExtractionEnabled()) {
         // V2 write path: dedupe/supersede + v2 columns. Non-blocking, soft-fail.
         for (const item of newMemories) {
-          await writeMemoryItem(supabase, item).catch(() => "skipped" as const);
+          await writeMemoryItem(supabase, item, userKey).catch(() => "skipped" as const);
         }
       } else if (newMemories.length) {
         const { data: inserted } = await withTimeout(supabase.from("memories").upsert(newMemories.map((item) => ({ user_key: userKey, memory: item.memory.trim(), category: item.category, importance: Math.min(5, Math.max(1, item.importance ?? 3)), updated_at: new Date().toISOString(), last_used_at: new Date().toISOString(), source_kind: "event" })), { onConflict: "user_key,memory" }).select("id,memory,category,embedding"), supabaseTimeoutMs, "memory upsert");
@@ -880,7 +967,7 @@ async function chatReply(
           const vectorByText = new Map(texts.map((text, index) => [text, vectors[index]] as const));
           await Promise.allSettled(insertedRows.map((row) => {
             const vector = vectorByText.get(row.memory.trim());
-            return vector ? withTimeout(supabase.from("memories").update({ embedding: vector }).eq("id", row.id), supabaseTimeoutMs, "memory embed") : Promise.resolve(null);
+            return vector ? withTimeout(supabase.from("memories").update({ embedding: vector }).eq("user_key", userKey).eq("id", row.id), supabaseTimeoutMs, "memory embed") : Promise.resolve(null);
           }));
         }
         // Supersession sweep (OpenAmika correction pairs): a new fact that
@@ -899,8 +986,8 @@ async function chatReply(
             if (score >= threshold && (!best || score > best.score)) best = { id: candidate.id, score };
           }
           if (best) {
-            await withTimeout(supabase.from("memories").update({ superseded: true }).eq("id", best.id), supabaseTimeoutMs, "memory supersede").catch(() => null);
-            await withTimeout(supabase.from("memories").update({ supersedes_id: best.id }).eq("id", row.id), supabaseTimeoutMs, "memory supersedes link").catch(() => null);
+            await withTimeout(supabase.from("memories").update({ superseded: true }).eq("user_key", userKey).eq("id", best.id), supabaseTimeoutMs, "memory supersede").catch(() => null);
+            await withTimeout(supabase.from("memories").update({ supersedes_id: best.id }).eq("user_key", userKey).eq("id", row.id), supabaseTimeoutMs, "memory supersedes link").catch(() => null);
           }
         }
       }
@@ -923,7 +1010,7 @@ async function chatReply(
       await saveCompanionState(userKey, nextState);
       if (memoryConsolidationEnabled() && inputMessages.length >= memoryConsolidationBatchN()) {
         // On-demand consolidation trigger (server): every N messages, background.
-        await runConsolidation(supabase).catch(() => null);
+        await runConsolidation(supabase, userKey).catch(() => null);
       }
     } catch (error) { console.warn("Persistence unavailable", error); }
   });
@@ -948,8 +1035,10 @@ async function chatReply(
     tools: toolResults.map((item) => item.name),
     companion: nextState,
     memories,
+    chatQuota,
   };
   const finalTtsSession: StreamingTtsSession | null = activeTtsSession;
+  replyEmitted = true;
   if (finalTtsSession && streamControl) {
     streamControl.emitReply(200, payload);
     if (!sawDeltaForActiveAttempt && replyText) {
@@ -958,4 +1047,9 @@ async function chatReply(
     await finalTtsSession.finish().catch(() => {});
   }
   return NextResponse.json(payload);
+  } catch (error) {
+    abortTtsAttempt(activeTtsSession);
+    await refundIfNeeded();
+    throw error;
+  }
 }

@@ -97,10 +97,10 @@ test("unavailable cloud data and failed writes throw instead of claiming success
   await assert.rejects(client.fetchHistory(), /Unavailable/);
   await assert.rejects(client.appendHistory({ id, title: "Title" }, [msg], true), /Unavailable/);
 });
-test("history route rejects signed-out requests before body parsing or database access", async () => {
+test("history route rejects signed-out requests before body parsing or database access and scopes calls by user.id", async () => {
   const denied = Response.json({ code: "AUTH_REQUIRED" }, { status: 401 });
   const route = load("../app/api/conversations/route.ts", {
-    "@/lib/auth/server": { requireApiAccess: async () => denied },
+    "@/lib/auth/server": { requireAuthorizedUser: async () => ({ user: null, denied }) },
     "@/lib/supabase-admin": { getSupabaseAdmin: () => assert.fail("No DB access") },
     "@/lib/chat-history-store": store,
     "@/lib/scenes": load("../lib/scenes.ts"),
@@ -109,4 +109,27 @@ test("history route rejects signed-out requests before body parsing or database 
   });
   assert.equal(await route.GET(new Request("https://vivian.example/api/conversations")), denied);
   assert.equal(await route.PUT(new Request("https://vivian.example/api/conversations", { method: "PUT", body: "invalid" })), denied);
+
+  const seenUserIds = [];
+  let activeUser = { id: "user-a", email: "a@example.com" };
+  const scopedRoute = load("../app/api/conversations/route.ts", {
+    "@/lib/auth/server": { requireAuthorizedUser: async () => ({ user: activeUser, denied: null }) },
+    "@/lib/supabase-admin": { getSupabaseAdmin: () => ({}) },
+    "@/lib/chat-history-store": {
+      ...store,
+      listHistory: async (_db, _offset, userKey) => { seenUserIds.push(["list", userKey]); return { conversations: [], nextOffset: null }; },
+      readHistory: async (_db, _id, _after, userKey) => { seenUserIds.push(["read", userKey]); return { messages: [], nextCursor: null }; },
+      saveHistory: async (_db, _input, userKey) => { seenUserIds.push(["save", userKey]); },
+      deleteHistory: async (_db, _id, userKey) => { seenUserIds.push(["delete", userKey]); },
+    },
+    "@/lib/scenes": load("../lib/scenes.ts"),
+    "@/lib/scene-images": { readBoundedSceneBody: async (req) => Buffer.from(await req.text()) },
+    "@/lib/rate-limit": { rateLimit: () => ({ allowed: true }) },
+  });
+  await scopedRoute.GET(new Request("https://vivian.example/api/conversations"));
+  await scopedRoute.GET(new Request(`https://vivian.example/api/conversations?id=${id}`));
+  activeUser = { id: "user-b", email: "b@example.com" };
+  await scopedRoute.PUT(new Request("https://vivian.example/api/conversations", { method: "PUT", body: JSON.stringify({ id, title: "Title", messages: [msg], create: true }) }));
+  await scopedRoute.DELETE(new Request(`https://vivian.example/api/conversations?id=${id}`, { method: "DELETE" }));
+  assert.deepEqual(seenUserIds, [["list", "user-a"], ["read", "user-a"], ["save", "user-b"], ["delete", "user-b"]]);
 });
