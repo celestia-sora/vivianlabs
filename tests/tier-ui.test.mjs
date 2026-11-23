@@ -16,7 +16,7 @@ function loadTsxWithMocks(relPath, imports = {}, globals = {}) {
     },
   }).outputText;
   const exports = {};
-  const module = { exports };
+  const cjsModule = { exports };
   const fn = new Function(
     "exports",
     "module",
@@ -26,13 +26,13 @@ function loadTsxWithMocks(relPath, imports = {}, globals = {}) {
   );
   fn(
     exports,
-    module,
+    cjsModule,
     (name) => {
       if (name in imports) return imports[name];
       if (name === "react/jsx-runtime") {
         return {
-          jsx: (type, props) => ({ type, props }),
-          jsxs: (type, props) => ({ type, props }),
+          jsx: (type, props, key) => ({ type, props, key: key ?? null }),
+          jsxs: (type, props, key) => ({ type, props, key: key ?? null }),
           Fragment: Symbol.for("react.fragment"),
         };
       }
@@ -40,7 +40,7 @@ function loadTsxWithMocks(relPath, imports = {}, globals = {}) {
     },
     ...Object.values(globals),
   );
-  return module.exports;
+  return cjsModule.exports;
 }
 
 const tierPanel = loadTsxWithMocks("../app/components/tier-panel.tsx", {
@@ -522,4 +522,58 @@ test("UI pages & components remove invite-only copy, preserve local models, and 
   assert.match(tierPanelSource, /mailto:/);
   assert.match(tierPanelSource, /\/api\/tier-requests/);
   assert.match(tierPanelSource, /\/api\/admin\/tier-requests/);
+});
+
+test("RequestSelectedModal keeps the same child identity when selectedRequest becomes pending on submit", () => {
+  const beforeSubmit = tierPanel.RequestSelectedModal({
+    open: true,
+    account: {
+      user: { id: "u1", email: "free@example.com" },
+      tier: "free",
+      capabilities: { tier: "free", dailyChatLimit: 5, canUseCloudModels: false, canUseCloudScenes: false, canViewSharedModels: false, personalStorageLimitBytes: 0, isAdmin: false },
+      chatQuota: { allowed: true, tier: "free", used: 0, limit: 5, remaining: 5, usageDate: "2026-11-23", resetAt: "2026-11-23T17:00:00.000Z" },
+      storage: { usedBytes: 0, limitBytes: 0 },
+      selectedRequest: null,
+      mailtoUrl: "mailto:viviannextlabs@gmail.com",
+      requestEmail: "viviannextlabs@gmail.com",
+    },
+    accountEmail: "free@example.com",
+    accountId: "u1",
+    onClose: () => {},
+    onSubmitted: () => {},
+    onAccountRefresh: async () => {},
+  });
+  const afterSubmit = tierPanel.RequestSelectedModal({
+    open: true,
+    account: {
+      user: { id: "u1", email: "free@example.com" },
+      tier: "free",
+      capabilities: { tier: "free", dailyChatLimit: 5, canUseCloudModels: false, canUseCloudScenes: false, canViewSharedModels: false, personalStorageLimitBytes: 0, isAdmin: false },
+      chatQuota: { allowed: true, tier: "free", used: 0, limit: 5, remaining: 5, usageDate: "2026-11-23", resetAt: "2026-11-23T17:00:00.000Z" },
+      storage: { usedBytes: 0, limitBytes: 0 },
+      selectedRequest: {
+        id: "req-1",
+        userId: "u1",
+        email: "free@example.com",
+        displayName: "Sora",
+        reason: "Testing",
+        status: "pending",
+        reviewedBy: null,
+        reviewNote: "",
+        reviewedAt: null,
+        createdAt: "2026-11-23T06:00:00.000Z",
+        updatedAt: "2026-11-23T06:00:00.000Z",
+      },
+      mailtoUrl: "mailto:viviannextlabs@gmail.com",
+      requestEmail: "viviannextlabs@gmail.com",
+    },
+    accountEmail: "free@example.com",
+    accountId: "u1",
+    onClose: () => {},
+    onSubmitted: () => {},
+    onAccountRefresh: async () => {},
+  });
+  assert.equal(beforeSubmit.type, afterSubmit.type);
+  assert.equal(beforeSubmit.key, null);
+  assert.equal(afterSubmit.key, null);
 });

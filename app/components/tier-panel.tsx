@@ -296,7 +296,6 @@ export function RequestSelectedModal(props: {
   if (!props.open) return null;
   return (
     <RequestSelectedModalBody
-      key={`${props.account?.selectedRequest?.id ?? "new"}:${props.account?.selectedRequest?.status ?? "none"}`}
       account={props.account}
       accountEmail={props.accountEmail}
       accountId={props.accountId}
