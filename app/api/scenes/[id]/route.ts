@@ -1,4 +1,4 @@
-import { sceneApi } from "@/lib/scene-api";
+import { sceneApi, signSceneUrls } from "@/lib/scene-api";
 import { deleteScene, getScene, saveScene, SceneTierError } from "@/lib/scene-store";
 import { normalizeSceneImage, readSceneInput } from "@/lib/scene-images";
 export const runtime = "nodejs";
@@ -12,7 +12,8 @@ export async function PATCH(request: Request, context: Context) {
     await getScene(db, userId, id);
     const input = await readSceneInput(request);
     const image = input.bytes && input.mime ? await normalizeSceneImage(input.bytes, input.mime) : {};
-    return Response.json({ scene: await saveScene(db, userId, { ...input, ...image }, id, { tier }) });
+    const scene = await saveScene(db, userId, { ...input, ...image }, id, { tier });
+    return Response.json({ scene: signSceneUrls(scene, userId) });
   });
 }
 export async function DELETE(request: Request, context: Context) {

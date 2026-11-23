@@ -608,9 +608,10 @@ function createHarness(options = {}) {
     sceneImage: load(
       "../app/api/scenes/[id]/image/route.ts",
       {
+        "@/lib/rate-limit": rateLimitMod,
         "@/lib/scene-api": sceneApiMod,
         "@/lib/scene-store": sceneStore,
-        "@/lib/scenes": scenes,
+        "@/lib/user-tiers": userTiers,
       },
       globals,
     ),
@@ -1194,14 +1195,54 @@ test("models, scenes, and storage/status enforce free, selected (512 MiB private
   assert.equal(selStorage.supabase, null);
   assert.equal(selStorage.r2.limitBytes, 536870912);
 
-  // Selected user can create a private scene
+  // Selected user can create a private scene and receives signed image/thumbnail URLs
   const selSceneCreate = await h.routes.scenes.POST(
     new Request("https://vivian.example/api/scenes", { method: "POST" }),
   );
   assert.equal(selSceneCreate.status, 201);
   const createdScene = (await selSceneCreate.json()).scene;
+  assert.match(createdScene.imageUrl, /[?&]token=/);
+  assert.match(createdScene.thumbnailUrl, /[?&]token=/);
 
-  // Authenticated GET /api/scenes/[id]/image as free returns 403 TIER_REQUIRED; unauthenticated <img> fetch still works
+  // Unauthenticated GET /api/scenes/[id]/image without Authorization or valid token is rejected (401 AUTH_REQUIRED)
+  const unauthNoToken = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example/api/scenes/${createdScene.id}/image`),
+    { params: Promise.resolve({ id: createdScene.id }) },
+  );
+  assert.equal(unauthNoToken.status, 401);
+  assert.equal((await unauthNoToken.json()).code, "AUTH_REQUIRED");
+
+  // Tampered or wrong-scene token is rejected (401 AUTH_REQUIRED)
+  const badTokenImg = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example/api/scenes/${createdScene.id}/image?token=tampered.token`),
+    { params: Promise.resolve({ id: createdScene.id }) },
+  );
+  assert.equal(badTokenImg.status, 401);
+  assert.equal((await badTokenImg.json()).code, "AUTH_REQUIRED");
+
+  const otherSceneId = "00000000-0000-4000-8000-000000000099";
+  const signedToken = new URL(createdScene.imageUrl, "https://vivian.example").searchParams.get("token");
+  const wrongSceneTokenRes = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example/api/scenes/${otherSceneId}/image?token=${encodeURIComponent(signedToken)}`),
+    { params: Promise.resolve({ id: otherSceneId }) },
+  );
+  assert.equal(wrongSceneTokenRes.status, 401);
+
+  // Signed imageUrl & thumbnailUrl work for <img> without Authorization header and stay private
+  const signedImgRes = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example${createdScene.imageUrl}`),
+    { params: Promise.resolve({ id: createdScene.id }) },
+  );
+  assert.equal(signedImgRes.status, 200);
+  assert.match(signedImgRes.headers.get("cache-control") ?? "", /^private/);
+
+  const signedThumbRes = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example${createdScene.thumbnailUrl}`),
+    { params: Promise.resolve({ id: createdScene.id }) },
+  );
+  assert.equal(signedThumbRes.status, 200);
+
+  // Authenticated GET /api/scenes/[id]/image as free returns 403 TIER_REQUIRED
   h.setUser({ id: "u-free", email: "free@example.com" });
   const authFreeImg = await h.routes.sceneImage.GET(
     new Request(`https://vivian.example/api/scenes/${createdScene.id}/image`, {
@@ -1212,11 +1253,32 @@ test("models, scenes, and storage/status enforce free, selected (512 MiB private
   assert.equal(authFreeImg.status, 403);
   assert.equal((await authFreeImg.json()).code, "TIER_REQUIRED");
 
-  const publicImg = await h.routes.sceneImage.GET(
-    new Request(`https://vivian.example/api/scenes/${createdScene.id}/image`),
+  // Another Selected user cannot fetch u-sel's scene via Bearer auth (404)
+  h.db.tables.vivian_user_accounts.push({
+    user_id: "u-sel-other",
+    email: "selected-other@example.com",
+    tier: "selected",
+    legacy_claimed_at: null,
+    created_at: "2026-11-23T00:00:00.000Z",
+    updated_at: "2026-11-23T00:00:00.000Z",
+  });
+  h.setUser({ id: "u-sel-other", email: "selected-other@example.com" });
+  const otherSelImg = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example/api/scenes/${createdScene.id}/image`, {
+      headers: { authorization: "Bearer tok" },
+    }),
     { params: Promise.resolve({ id: createdScene.id }) },
   );
-  assert.equal(publicImg.status, 200);
+  assert.equal(otherSelImg.status, 404);
+
+  // Downgrading u-sel to free immediately invalidates previously signed image tokens (403 TIER_REQUIRED)
+  h.db.tables.vivian_user_accounts.find((a) => a.user_id === "u-sel").tier = "free";
+  const downgradedImgRes = await h.routes.sceneImage.GET(
+    new Request(`https://vivian.example${createdScene.imageUrl}`),
+    { params: Promise.resolve({ id: createdScene.id }) },
+  );
+  assert.equal(downgradedImgRes.status, 403);
+  assert.equal((await downgradedImgRes.json()).code, "TIER_REQUIRED");
 
   // 4. Sorachan sees both full global storage status and shared models
   h.setUser({ id: "u-sora", email: "suphloeksangko@gmail.com" });
