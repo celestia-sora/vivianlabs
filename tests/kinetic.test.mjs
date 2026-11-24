@@ -80,9 +80,9 @@ test("TtsSyncController windows long text", () => {
   const c = new TtsSyncController();
   c.startTurn("t");
   c.addWords("t", Array.from({ length: 20 }, (_, i) => ({ id: `w${i}`, text: `${i}`, startSec: i, endSec: i + 0.5 })));
-  const f = c.frame(19.1, 6);
-  assert.equal(f.length, 6);
-  assert.equal(f[5].text, "19");
+  const f = c.frame(19.1);
+  assert.equal(f.length, 10);
+  assert.equal(f[9].text, "19");
 });
 
 test("SttSyncController replaces partials without duplicating and commits once", () => {

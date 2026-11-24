@@ -537,11 +537,11 @@ img.conversation-avatar { display: block; width: 38px; height: 38px; object-fit:
 .kinetic-text { display: flex; flex-direction: column; align-items: center; max-width: 100%; }
 .kinetic-text.is-empty { display: none; }
 .kinetic-label { display: block; margin-bottom: 2px; color: #6b6b8f; font-family: Arial, sans-serif; font-size: 9px; letter-spacing: .13em; text-transform: uppercase; }
-.kinetic-row { display: flex; flex-wrap: nowrap; justify-content: center; align-items: baseline; gap: .28em; max-width: 100%; overflow: hidden; white-space: nowrap; line-height: 1.42; mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 100%); -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 100%); }
-.kinetic-vivian { color: #241329; font-size: clamp(17px, 1.8vw, 24px); }
-.kinetic-user { color: #3a2f47; font-size: clamp(14px, 1.4vw, 18px); }
-.kinetic-word { display: inline-block; will-change: transform, opacity; transform-origin: 50% 80%; transition: opacity .35s ease, transform .35s cubic-bezier(.16, 1, .3, 1), color .3s ease; opacity: calc(1 - var(--age, 0) * .17); }
-.kinetic-word.is-active { opacity: 1; transform: scale(1.08); font-weight: 600; }
-.kinetic-word.is-incoming { opacity: .6; }
-.kinetic-word.is-final { opacity: calc(1 - var(--age, 0) * .15); }
+.kinetic-row { display: flex; flex-wrap: nowrap; justify-content: center; align-items: baseline; gap: .1em; max-width: 100%; overflow: hidden; white-space: nowrap; line-height: 1.4; mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 100%); -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 100%); }
+.kinetic-vivian { color: #241329; font-size: clamp(16px, 1.7vw, 23px); }
+.kinetic-user { color: #3a2f47; font-size: clamp(14px, 1.35vw, 17px); }
+.kinetic-word { display: inline-block; will-change: transform, opacity; transform-origin: 50% 80%; transition: opacity .45s ease, transform .35s cubic-bezier(.16, 1, .3, 1), color .3s ease; opacity: max(.28, calc(1 - var(--age, 0) * .07)); }
+.kinetic-word.is-active { opacity: 1; transform: scale(1.06); font-weight: 600; }
+.kinetic-word.is-incoming { opacity: .72; }
+.kinetic-word.is-final { opacity: max(.35, calc(1 - var(--age, 0) * .06)); }
 @media (prefers-reduced-motion: reduce) { .kinetic-word { transition: opacity .2s linear; } .kinetic-word.is-active { transform: none; } }

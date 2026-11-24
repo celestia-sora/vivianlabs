@@ -6,7 +6,7 @@ export interface KineticWord {
   state: KineticWordState;
 }
 
-export const KINETIC_WINDOW = 6;
+export const KINETIC_WINDOW = 10;
 
 /**
  * Tiny external store so a controller can push frames to `KineticText`

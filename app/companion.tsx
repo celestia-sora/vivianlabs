@@ -2385,7 +2385,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           if (fullUtterance) {
             userKinetic.set(sttSync.frame());
             void sendMessage(fullUtterance);
-            sttClearTimerRef.current = window.setTimeout(clearUserKinetic, 2000);
+            sttClearTimerRef.current = window.setTimeout(clearUserKinetic, 4500);
             recorderRef.current = null;
             streamRef.current = null;
             window.setTimeout(resumeListening, 250);
