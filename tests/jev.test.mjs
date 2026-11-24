@@ -219,7 +219,7 @@ for (const phase of ["headers", "body"]) {
 
 // Exercise the actual chat route, JEV client, parser and plan; mock only auth,
 // persistence and upstream services. Never send test messages to cloud memory.
-function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, geminiReply, timeout = 2000, sceneContext = null, sceneFailure = false, sceneExecutionFailure = false, user = { id: "fixture-user", email: "fixture@example.com" } } = {}) {
+function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, geminiReply, timeout = 2000, sceneContext = null, sceneFailure = false, sceneExecutionFailure = false, user = { id: "fixture-user", email: "suphloeksangko@gmail.com" } } = {}) {
   const calls = [], background = [], memoryLoads = [];
   const providerEnv = { TYPESAFE_API_KEY: "fixture-jev", GROQ_API_KEY: "fixture-groq", GEMINI_API_KEY: "fixture-gemini", SUPABASE_URL: "fixture-db", SUPABASE_SERVICE_ROLE_KEY: "fixture-admin", ...env };
   const fixtureJev = client(async (url, options) => {
@@ -230,6 +230,8 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
   const fixtureTools = load("../lib/tools.ts", {}, { process: { env: {} }, fetch: async () => assert.fail("Unexpected live local tool request") });
   const policy = load("../lib/auth/policy.ts");
   const userTiers = load("../lib/user-tiers.ts", { "./auth/policy.ts": policy });
+  const userProfileMod = load("../lib/user-profile.ts");
+  const userProfileStoreMod = load("../lib/user-profile-store.ts", { "./user-profile": userProfileMod });
   const imports = {
     "@/lib/scene-store": {
       loadSceneContext: async () => { if (sceneFailure) throw new Error("Storage offline"); return sceneContext; },
@@ -252,7 +254,8 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/vivian-story": story,
     "@/lib/vivian-dialogue": dialogue,
     "@/lib/vivian-persona": persona,
-    "@/lib/user-profile": load("../lib/user-profile.ts"),
+    "@/lib/user-profile": userProfileMod,
+    "@/lib/user-profile-store": userProfileStoreMod,
     "@/lib/custom-instructions": customInstructions,
     "@/lib/speech": load("../lib/speech.ts"),
     "@/lib/memory-recall": recall,
@@ -275,6 +278,7 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/chat-decision": fixturePlan,
     "@/lib/chat-stream": load("../lib/chat-stream.ts", {}, { Response, ReadableStream, TextEncoder, TextDecoder }),
     "@/lib/elevenlabs-voice": { resolveElevenLabsVoiceId: async () => "fixture-voice" },
+    "@/lib/tts-session-factory": { createTtsSession: () => ({ pushDelta() {}, async finish() {}, abort() {} }) },
     "@/lib/tts-stream-session": { StreamingTtsSession: class { pushDelta() {} async finish() {} abort() {} } },
     // Phase 2 memory: real pure helpers; consolidation side-effects stubbed
     // so chat fixtures never write. Flags default OFF in this sandbox env,

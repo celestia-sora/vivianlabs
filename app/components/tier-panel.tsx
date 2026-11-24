@@ -47,6 +47,16 @@ export interface AccountTierRequestRecord {
 export interface AccountSummary {
   user: { id: string; email: string };
   tier: TierKey;
+  isSorachan?: boolean;
+  userProfile?: {
+    userId?: string;
+    displayName?: string;
+    relationship?: string;
+    pronouns?: string;
+    styleNotes?: string;
+    onboarded?: boolean;
+    updatedAt?: string | null;
+  };
   capabilities: AccountTierCapabilities;
   chatQuota: AccountChatQuota;
   storage: {
@@ -170,12 +180,16 @@ export function TierMenuSummary({
   account,
   accountEmail,
   loading,
+  profileDisplayName,
   onOpenRequest,
+  onOpenProfile,
 }: {
   account: AccountSummary | null;
   accountEmail: string;
   loading?: boolean;
+  profileDisplayName?: string;
   onOpenRequest: () => void;
+  onOpenProfile?: () => void;
 }) {
   const tier = account?.tier ?? "free";
   const badgeLine = account
@@ -184,6 +198,7 @@ export function TierMenuSummary({
       ? "Checking plan…"
       : "Free · 5/5 chats today";
   const email = account?.user.email || accountEmail;
+  const resolvedName = profileDisplayName?.trim() || account?.userProfile?.displayName?.trim() || "";
 
   return (
     <div className="tier-menu-card" aria-label="Account tier summary">
@@ -199,17 +214,28 @@ export function TierMenuSummary({
         </span>
         {email && <small className="tier-menu-email">{email}</small>}
       </div>
-      {account && tier === "free" && (
-        <button
-          type="button"
-          className="tier-menu-upgrade"
-          onClick={onOpenRequest}
-        >
-          {account.selectedRequest?.status === "pending"
-            ? "Selected Request Pending"
-            : "Request Selected Tier"}
-        </button>
-      )}
+      <div className="tier-menu-actions" style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+        {account && tier === "free" && (
+          <button
+            type="button"
+            className="tier-menu-upgrade"
+            onClick={onOpenRequest}
+          >
+            {account.selectedRequest?.status === "pending"
+              ? "Selected Request Pending"
+              : "Request Selected Tier"}
+          </button>
+        )}
+        {onOpenProfile && (
+          <button
+            type="button"
+            className="tier-menu-upgrade"
+            onClick={onOpenProfile}
+          >
+            {resolvedName ? `ชื่อที่เรียก: ${resolvedName}` : "ตั้งค่าชื่อ & โปรไฟล์ของคุณ"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

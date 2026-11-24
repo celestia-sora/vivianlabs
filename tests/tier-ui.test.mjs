@@ -268,6 +268,12 @@ test("companion sendMessage handles QUOTA_EXCEEDED and pre-flight zero quota wit
       markActivity() {},
       captureCurrentFrame: () => null,
       handleExpressionCommand: async () => false,
+      stopKinetic() {},
+      setKineticReplyId() {},
+      startKineticLoop() {},
+      ttsSync: { startTurn() {}, addWords() {}, resetAttempt() {}, end() {} },
+      ttsTracker: { reset() {}, setLanguage() {}, ingest: () => [], markSentenceEnd: () => [], flushAll: () => [] },
+      parseAlignmentEvent: () => null,
       authFetch: async (url, init) => {
         state.fetchCalls += 1;
         return fetchImpl(url, init);

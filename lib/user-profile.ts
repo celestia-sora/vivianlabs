@@ -178,6 +178,19 @@ export function relationshipPromptHint(relationship: RelationshipPreset): string
   return found ? found.promptHint : RELATIONSHIP_PRESETS[0].promptHint;
 }
 
+export function sanitizeLegacySorachanText(
+  text: string,
+  options: { isSorachan?: boolean; displayName?: string } = {},
+): string {
+  if (!text || options.isSorachan) return text;
+  const customName = options.displayName?.trim() || "";
+  if (/^(sora|sorachan|โซระ|โซระจัง)$/i.test(customName)) return text;
+  const replacement = customName || "คุณ";
+  return text
+    .replace(/โซระจัง/g, replacement)
+    .replace(/\bsorachan\b/gi, replacement);
+}
+
 export function buildUserProfilePromptBlock(
   profile: Partial<UserProfile> | null | undefined,
   options: { isSorachan?: boolean } = {},
@@ -194,9 +207,10 @@ export function buildUserProfilePromptBlock(
 
   if (!isSorachan) {
     const userLabel = customName || "คุณ (ผู้ใช้คนปัจจุบัน)";
+    const explicitSelfNamedSora = /^(sora|sorachan|โซระ|โซระจัง)$/i.test(customName);
     lines.push(
       `ข้อมูลคู่สนทนาของบัญชีนี้ (แยกตามบัญชี):`,
-      `- คู่สนทนาปัจจุบันชื่อ: "${userLabel}" (ให้เรียกคู่สนทนาว่า "${customName || "คุณ"}" ตามธรรมชาติ และห้ามเรียกคู่สนทนาคนนี้ว่า "โซระจัง" หรือ "Sora" เด็ดขาด ยกเว้นเจ้าตัวตั้งชื่อนั้นเอง)`,
+      `- คู่สนทนาปัจจุบันชื่อ: "${userLabel}" (ให้เรียกคู่สนทนาว่า "${customName || "คุณ"}" ตามธรรมชาติ${explicitSelfNamedSora ? "" : ' และห้ามเรียกคู่สนทนาคนนี้ว่า "โซระจัง" หรือ "Sora" และห้ามพูดถึง "ริวกะ" เด็ดขาด แม้ในบทสนทนาเก่าจะเคยมีหลงอยู่ก็ตาม'})`,
       `- ความสัมพันธ์กับ Vivian: ${relationshipPromptHint(relationship)}`,
     );
   } else if (customName && customName !== "โซระจัง") {

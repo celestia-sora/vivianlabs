@@ -491,6 +491,9 @@ function createHarness(options = {}) {
     globals,
   );
 
+  const userProfileMod = load("../lib/user-profile.ts", {}, globals);
+  const userProfileStoreMod = load("../lib/user-profile-store.ts", { "./user-profile": userProfileMod }, globals);
+
   const routes = {
     account: load(
       "../app/api/account/route.ts",
@@ -500,6 +503,8 @@ function createHarness(options = {}) {
         "@/lib/rate-limit": rateLimitMod,
         "@/lib/supabase-admin": supabaseAdminMod,
         "@/lib/tier-requests": tierRequests,
+        "@/lib/user-profile": userProfileMod,
+        "@/lib/user-profile-store": userProfileStoreMod,
         "@/lib/user-tiers": userTiers,
         "next/server": nextServerMod,
       },
@@ -661,9 +666,11 @@ function createHarness(options = {}) {
         "@/lib/companion": companion,
         "@/lib/vivian-persona": load("../lib/vivian-persona.ts", { "@/lib/custom-instructions": load("../lib/custom-instructions.ts", {}, globals) }, globals),
         "@/lib/vivian-story": load("../lib/vivian-story.ts", {}, globals),
-        "@/lib/user-profile": load("../lib/user-profile.ts", {}, globals),
+        "@/lib/user-profile": userProfileMod,
+        "@/lib/user-profile-store": userProfileStoreMod,
         "@/lib/companion-store": companionStore,
         "@/lib/elevenlabs-voice": elevenLabsVoice,
+        "@/lib/tts-session-factory": { createTtsSession: () => ({ pushDelta() {}, async finish() {}, abort() {} }) },
         "@/lib/tts-stream-session": { StreamingTtsSession: class { pushDelta() {} async finish() {} abort() {} } },
         "@/lib/supabase-admin": supabaseAdminMod,
         "@/lib/tools": load("../lib/tools.ts", {}, globals),

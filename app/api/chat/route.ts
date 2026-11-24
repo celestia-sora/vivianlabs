@@ -20,8 +20,10 @@ import {
   buildUserProfilePromptBlock,
   defaultUserProfile,
   isRelationshipPreset,
+  sanitizeLegacySorachanText,
   type UserProfile,
 } from "@/lib/user-profile";
+import { loadUserProfileServer } from "@/lib/user-profile-store";
 import { loadCompanionState, saveCompanionState } from "@/lib/companion-store";
 import { resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
 import { createTtsSession, type TtsSessionLike } from "@/lib/tts-session-factory";
@@ -594,22 +596,19 @@ async function chatReply(
   const userProfilePromise = (async (): Promise<UserProfile> => {
     const fallback = clientFallbackProfile();
     try {
-      const { data, error } = await getSupabaseAdmin(AbortSignal.timeout(5000))
-        .from("vivian_user_profiles")
-        .select("display_name,relationship,pronouns,style_notes,onboarded,updated_at")
-        .eq("user_id", userKey)
-        .maybeSingle();
-      if (error || !data) return fallback;
-      const row = data as Record<string, unknown>;
-      const displayName = typeof row.display_name === "string" ? row.display_name.trim() : "";
+      const loaded = await loadUserProfileServer(
+        getSupabaseAdmin(AbortSignal.timeout(5000)),
+        userKey,
+        isSorachanAccount,
+      );
+      if (isSorachanAccount) return loaded;
+      const hasServerProfile = Boolean(loaded.onboarded || loaded.displayName.trim() || loaded.pronouns.trim() || loaded.styleNotes.trim());
+      if (!hasServerProfile) return fallback;
       return {
-        userId: userKey,
-        displayName: displayName || fallback.displayName,
-        relationship: isRelationshipPreset(row.relationship) ? row.relationship : fallback.relationship,
-        pronouns: typeof row.pronouns === "string" ? row.pronouns.trim() : fallback.pronouns,
-        styleNotes: typeof row.style_notes === "string" ? row.style_notes.trim() : fallback.styleNotes,
-        onboarded: typeof row.onboarded === "boolean" ? row.onboarded : fallback.onboarded,
-        updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
+        ...loaded,
+        displayName: loaded.displayName || fallback.displayName,
+        pronouns: loaded.pronouns || fallback.pronouns,
+        styleNotes: loaded.styleNotes || fallback.styleNotes,
       };
     } catch {
       return fallback;
@@ -705,26 +704,24 @@ async function chatReply(
   const sceneContextBlock = activeSceneLabel
     ? `\n\nฉากปัจจุบันของฉากหลังคือ "${activeSceneLabel}" ให้ใช้เป็นฉากหลังตามธรรมชาติโดยไม่ต้องรายงานระบบฉาก. ไม่จำเป็นต้องพูดถึงชื่อฉากทุกครั้ง: ให้พูดถึง "ที่นี่" หรือ "ตรงนี้" เป็นหลัก และพูดชื่อฉากเฉพาะเมื่อผู้ใช้ถามถึงสถานที่ ชวนเปลี่ยนที่ หรือบริบทต้องการจริง. ห้ามย้ำชื่อฉากเดิมซ้ำติดกัน และไม่ต้องมีฉากใหม่เมื่อผู้ใช้ไม่ได้ชวนเปลี่ยน`
     : "";
-  const hasCustomUserProfile = !isSorachanAccount && Boolean(
-    userProfile.displayName.trim() ||
-    userProfile.pronouns.trim() ||
-    userProfile.styleNotes.trim() ||
-    userProfile.onboarded,
-  );
-  const profileContextBlock = (isSorachanAccount || hasCustomUserProfile)
-    ? buildUserProfilePromptBlock(userProfile, { isSorachan: isSorachanAccount })
-    : "";
+  const profileContextBlock = buildUserProfilePromptBlock(userProfile, { isSorachan: isSorachanAccount });
+  const sanitizedSummary = isSorachanAccount
+    ? state.conversationSummary
+    : sanitizeLegacySorachanText(state.conversationSummary, {
+        isSorachan: false,
+        displayName: userProfile.displayName,
+      });
   // Owner Custom Instructions are the highest-priority configurable persona
   // layer. Always preserve the complete immutable core and the complete owner
   // block; only lower-priority story/state/memory/tool/scene hints are trimmed.
-  const basePrompt = personalityPrompt(state, memoryContext, toolContext, state.conversationSummary, character, personality, characterName, language);
+  const basePrompt = personalityPrompt(state, memoryContext, toolContext, sanitizedSummary, character, personality, characterName, language);
   const customPersonaPrompt = vivianTurnPrompt(customInstructions);
   const rawContextualPrompt = basePrompt.slice(vivianPersonaPrompt.length) + sceneContextBlock + plan.responseHint;
-  const accountPersonaPrompt = hasCustomUserProfile
+  const accountPersonaPrompt = !isSorachanAccount
     ? vivianPersonaForUser({ isSorachan: false, displayName: userProfile.displayName })
     : vivianPersonaPrompt;
   const partnerLabel = userProfile.displayName.trim() || "คุณ (ผู้ใช้คนปัจจุบัน)";
-  const contextualPrompt = hasCustomUserProfile
+  const contextualPrompt = !isSorachanAccount
     ? rawContextualPrompt
         .replace(VIVIAN_STORY, vivianStoryForUser({ isSorachan: false, displayName: userProfile.displayName }))
         .replace("ส่วน sorachan (โซระจัง) คือผู้ใช้และเป็นเพื่อนสนิทของเธอ", `ส่วน ${partnerLabel} คือผู้ใช้และเป็นคู่สนทนาของเธอ`)
@@ -735,7 +732,19 @@ async function chatReply(
   // Tidy blank runs without changing precedence. LANGUAGE LOCK remains last.
   const assembled = (accountPersonaPrompt + boundedContext + profileContextBlock + customPersonaPrompt).replace(/\n{3,}/g, "\n\n");
   const systemPrompt = assembled + languageLock(language);
-  const promptContents: ProviderMessage[] = contents;
+  const promptContents: ProviderMessage[] = isSorachanAccount
+    ? contents
+    : contents.map((item) =>
+        item.role === "assistant"
+          ? {
+              ...item,
+              content: sanitizeLegacySorachanText(item.content, {
+                isSorachan: false,
+                displayName: userProfile.displayName,
+              }),
+            }
+          : item,
+      );
 
   if (shouldSearch && !geminiApiKey && !process.env.TAVILY_API_KEY) {
     await refundIfNeeded();

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { SELECTED_REQUEST_EMAIL } from "@/lib/auth/policy";
+import { isSorachanEmail, SELECTED_REQUEST_EMAIL } from "@/lib/auth/policy";
 import { requireAuthorizedUser } from "@/lib/auth/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { buildSelectedRequestMailto, listUserTierRequests, TierRequestError } from "@/lib/tier-requests";
+import { defaultUserProfile } from "@/lib/user-profile";
+import { loadUserProfileServer } from "@/lib/user-profile-store";
 import { getUserTierSummary, TierError, tierErrorResponse } from "@/lib/user-tiers";
 
 const headers = { "Cache-Control": "private, no-store" };
@@ -18,7 +20,13 @@ export async function GET(request: Request) {
   try {
     const db = getSupabaseAdmin(AbortSignal.timeout(10_000));
     const summary = await getUserTierSummary(db, user);
-    const requests = await listUserTierRequests(db, summary.userId);
+    const isSorachan = isSorachanEmail(summary.email);
+    const [requests, userProfile] = await Promise.all([
+      listUserTierRequests(db, summary.userId),
+      loadUserProfileServer(db, summary.userId, isSorachan).catch(() =>
+        defaultUserProfile(summary.userId, isSorachan),
+      ),
+    ]);
     const selectedRequest = requests.find((item) => item.status === "pending") ?? requests[0] ?? null;
     const mailtoUrl = buildSelectedRequestMailto({
       userEmail: summary.email,
@@ -32,6 +40,8 @@ export async function GET(request: Request) {
       {
         user: { id: summary.userId, email: summary.email },
         tier: summary.tier,
+        isSorachan,
+        userProfile,
         capabilities: summary.capabilities,
         chatQuota: summary.chatQuota,
         storage: summary.storage,

@@ -176,6 +176,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   }, []);
 
   const sceneLibraryRef = useRef<{ refresh: () => Promise<void> } | null>(null);
+  const syncUserProfileFromAccountRef = useRef<((accountData: AccountSummary) => void) | null>(null);
 
   async function refreshAccount(signal?: AbortSignal) {
     let hasToken = false;
@@ -198,6 +199,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       setAccount(data);
       if (data.user?.email) setAccountEmail(data.user.email);
       if (data.user?.id) setAccountId(data.user.id);
+      syncUserProfileFromAccountRef.current?.(data);
       if (previousTier === "free" && data.tier !== "free") {
         void getCloudModels(signal).then(setCloudLibrary).catch(() => {});
         void sceneLibraryRef.current?.refresh().catch(() => {});
@@ -486,9 +488,11 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     setOnboardingOpen,
     saveUserProfile,
     dismissOnboarding,
+    syncUserProfileFromAccount,
   } = useUserProfile(accountId);
   const userProfileRef = useRef(userProfile);
   userProfileRef.current = userProfile;
+  syncUserProfileFromAccountRef.current = syncUserProfileFromAccount;
   const [editingMemoryId, setEditingMemoryId] = useState<number | null>(null);
   const [memoryDraft, setMemoryDraft] = useState("");
   const [backgroundMode, setBackgroundMode] = useState<keyof typeof BACKGROUNDS>("day");
@@ -3048,7 +3052,9 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                 account={account}
                 accountEmail={accountEmail}
                 loading={accountLoading}
+                profileDisplayName={userProfile.displayName}
                 onOpenRequest={() => setRequestModalOpen(true)}
+                onOpenProfile={() => { closeMenu(); setOnboardingOpen(true); }}
               />
               <button type="button" className="floating-new-chat" onClick={newConversation}><Icon name="plus" size={17}/> New Chat</button>
               <div className="floating-menu-list">{navigation.map((item) => <button key={item.key} type="button" className="floating-nav-item" onClick={() => openPanel(item.key)}><Icon name={item.icon} size={18}/><span>{item.label}</span><span className="nav-chevron"><Icon name="chevron" size={16}/></span></button>)}</div>
@@ -3263,7 +3269,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                 )}
                 <div className="custom-instructions"><strong>Reset Vivian</strong><p>ล้างความจำ แชต Mood และความสัมพันธ์บนคลาวด์ที่ใช้ร่วมกัน รวมถึงประวัติแชต — คำแนะนำส่วนตัว (persona) จะยังอยู่ ไม่ถูกล้าง</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ข้อมูลนี้จะถูกลบถาวรจากคลาวด์ที่ใช้ร่วมกันและแชตบนอุปกรณ์นี้ โมเดล การตั้งค่าเสียง และบัญชีล็อกอินจะยังอยู่</p><button type="button" className="floating-option" disabled={sending || resetting} onClick={() => { void resetVivian(); }}>ยืนยันรีเซ็ต Vivian</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังรีเซ็ต…" : "Reset memories and companion"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>Vivian personality & custom instructions</strong><p>กำหนดบุคลิก วิธีพูด น้ำเสียง นิสัย ความสนใจ และวิธีปฏิบัติต่อคุณได้จากช่องเดียว คำแนะนำนี้มี Priority เหนือบุคลิกเริ่มต้นของ Vivian และถูกใช้กับทุกแชต (ข้อกำหนดด้านความปลอดภัย ความจริง และขีดจำกัดของระบบยังคงเดิม)</p><textarea aria-label="Vivian personality and custom instructions" value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="ตัวอย่าง: ให้ Vivian ร่าเริงขึ้น พูดเป็นกันเอง ชอบแซวแบบน่ารัก ตอบภาษาไทยธรรมชาติ และไม่ต้องลงท้ายทุกประโยคด้วยคำถาม..."/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "Saving…" : "Save"}</button><button type="button" className="floating-option" disabled={savingCustomInstructions || !savedCustomInstructions} onClick={() => { void clearCustomInstructions(); }}>ล้างคำแนะนำ</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้บันทึก" : "ซิงก์ทุกเครื่องแล้ว")}</span><span role="status">{customInstructions.length} / 2000</span></div>{customInstructionVersions.length > 1 && <div className="custom-instruction-versions"><span>เวอร์ชันก่อนหน้า</span>{customInstructionVersions.slice(1, 4).map((v) => <button key={v.id} type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => restoreCustomInstructions(v.instructions)}>Restore previous version {new Date(v.created_at).toLocaleString()}</button>)}</div>}</div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> Language <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> About Vivian</button>
               </>}
-            {panel === "settings" && <div className="account-settings"><div><small>ลงชื่อเข้าใช้ด้วย</small><p>{accountEmail || "กำลังตรวจสอบบัญชี…"}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
+            {panel === "settings" && <div className="account-settings"><div><small>ลงชื่อเข้าใช้ด้วย</small><p>{accountEmail || "กำลังตรวจสอบบัญชี…"}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak", "vivian-user-profile-user", "vivian-custom-instructions-user"]) window.localStorage.removeItem(key); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
           </div>
         </section>
       </div>

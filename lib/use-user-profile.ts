@@ -65,6 +65,74 @@ export function useUserProfile(accountIdHint?: string) {
   const dismissedForUserRef = useRef<string>("");
   const aliveRef = useRef(false);
 
+  const applyRemoteProfile = useCallback(
+    (
+      userId: string,
+      sorachan: boolean,
+      rawProfile?: (Omit<Partial<UserProfile>, "relationship"> & { relationship?: string }) | null,
+    ) => {
+      if (!userId || !rawProfile) return;
+      const localCached = readCache(userId);
+      const remoteProfile: UserProfile = {
+        userId,
+        displayName:
+          typeof rawProfile.displayName === "string"
+            ? rawProfile.displayName
+            : sorachan
+              ? "โซระจัง"
+              : "",
+        relationship: isRelationshipPreset(rawProfile.relationship)
+          ? rawProfile.relationship
+          : "close_friend",
+        pronouns: typeof rawProfile.pronouns === "string" ? rawProfile.pronouns : "",
+        styleNotes: typeof rawProfile.styleNotes === "string" ? rawProfile.styleNotes : "",
+        onboarded: Boolean(rawProfile.onboarded) || sorachan,
+        updatedAt: typeof rawProfile.updatedAt === "string" ? rawProfile.updatedAt : null,
+      };
+
+      const effectiveProfile =
+        !remoteProfile.onboarded && localCached?.onboarded ? localCached : remoteProfile;
+
+      setIsSorachan(sorachan);
+      setProfile(effectiveProfile);
+      writeCache(userId, effectiveProfile);
+      setReady(true);
+
+      if (
+        !sorachan &&
+        (!effectiveProfile.onboarded || !effectiveProfile.displayName.trim()) &&
+        dismissedForUserRef.current !== userId
+      ) {
+        setOnboardingOpen(true);
+      }
+    },
+    [],
+  );
+
+  const syncFromAccount = useCallback(
+    (
+      accountData:
+        | {
+            user?: { id?: string };
+            isSorachan?: boolean;
+            tier?: string;
+            userProfile?: (Omit<Partial<UserProfile>, "relationship"> & { relationship?: string }) | null;
+          }
+        | null
+        | undefined,
+    ) => {
+      const userId = accountData?.user?.id;
+      if (!userId) return;
+      const sorachan = accountData.isSorachan === true || accountData.tier === "sorachan";
+      if (accountData.userProfile) {
+        applyRemoteProfile(userId, sorachan, accountData.userProfile);
+      } else {
+        applyRemoteProfile(userId, sorachan, defaultUserProfile(userId, sorachan));
+      }
+    },
+    [applyRemoteProfile],
+  );
+
   const refresh = useCallback(async () => {
     // Wait for `#token=...` in URL hash to be consumed into localStorage first.
     if (typeof window !== "undefined") {
@@ -98,48 +166,13 @@ export function useUserProfile(accountIdHint?: string) {
       }
       if (!aliveRef.current) return;
 
-      const sorachan = data.isSorachan === true;
-      const localCached = readCache(data.userId);
-      const remoteProfile: UserProfile = {
-        userId: data.userId,
-        displayName:
-          typeof data.profile.displayName === "string"
-            ? data.profile.displayName
-            : sorachan
-              ? "โซระจัง"
-              : "",
-        relationship: isRelationshipPreset(data.profile.relationship)
-          ? data.profile.relationship
-          : "close_friend",
-        pronouns: typeof data.profile.pronouns === "string" ? data.profile.pronouns : "",
-        styleNotes: typeof data.profile.styleNotes === "string" ? data.profile.styleNotes : "",
-        onboarded: Boolean(data.profile.onboarded) || sorachan,
-        updatedAt: typeof data.profile.updatedAt === "string" ? data.profile.updatedAt : null,
-      };
-
-      const effectiveProfile =
-        !remoteProfile.onboarded && localCached?.onboarded ? localCached : remoteProfile;
-
-      setIsSorachan(sorachan);
-      setProfile(effectiveProfile);
-      writeCache(data.userId, effectiveProfile);
-      setReady(true);
-
-      // Show onboarding popup for ANY non-Sorachan account (both newly registered
-      // and already-registered accounts) that has not completed onboarding yet.
-      if (
-        !sorachan &&
-        (!effectiveProfile.onboarded || !effectiveProfile.displayName.trim()) &&
-        dismissedForUserRef.current !== data.userId
-      ) {
-        setOnboardingOpen(true);
-      }
+      applyRemoteProfile(data.userId, data.isSorachan === true, data.profile);
     } catch {
       if (aliveRef.current) {
         setReady(true);
       }
     }
-  }, []);
+  }, [applyRemoteProfile]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -242,5 +275,6 @@ export function useUserProfile(accountIdHint?: string) {
     saveUserProfile: saveProfile,
     dismissOnboarding,
     refreshUserProfile: refresh,
+    syncUserProfileFromAccount: syncFromAccount,
   };
 }

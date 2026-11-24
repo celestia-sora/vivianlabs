@@ -141,13 +141,20 @@ test("Sorachan account keeps Sora/โซระจัง canon while non-Sorachan
   assert.match(block, /ชอบคุยเรื่องเขียนโค้ดและกาแฟ/);
 });
 
-test("/api/user-profile isolates profiles per account ID and marks Sorachan accounts onboarded by default", async () => {
+const userProfileStoreMod = load("../lib/user-profile-store.ts", {
+  "./user-profile": userProfileMod,
+});
+
+test("/api/user-profile isolates profiles per account ID, falls back cleanly when table is missing, and marks Sorachan onboarded by default", async () => {
   const rows = new Map();
+  const ciFallbackRows = new Map();
+  let simulateMissingTable = false;
   let activeUser = { id: "user-1", email: "newuser@example.com" };
 
   const route = load("../app/api/user-profile/route.ts", {
     "@/lib/auth/policy": policyMod,
     "@/lib/user-profile": userProfileMod,
+    "@/lib/user-profile-store": userProfileStoreMod,
     "@/lib/auth/server": {
       requireApiAccess: async (_req, cb) => {
         cb(activeUser);
@@ -157,19 +164,34 @@ test("/api/user-profile isolates profiles per account ID and marks Sorachan acco
     "@/lib/supabase-admin": {
       getSupabaseAdmin: () => ({
         from(table) {
-          assert.equal(table, "vivian_user_profiles");
           let filterUserId = "";
           let upserted = null;
           const q = {
             select() { return q; },
             eq(_col, val) { filterUserId = val; return q; },
             upsert(payload) {
-              upserted = payload;
-              rows.set(payload.user_id, { ...payload });
-              return q;
+              if (table === "vivian_user_profiles") {
+                if (simulateMissingTable) {
+                  return Object.assign(Promise.resolve({ data: null, error: { code: "PGRST205", message: "missing table" } }), {
+                    select() { return q; },
+                    single() { return Promise.resolve({ data: null, error: { code: "PGRST205", message: "missing table" } }); },
+                  });
+                }
+                upserted = payload;
+                rows.set(payload.user_id, { ...payload });
+                return q;
+              }
+              assert.equal(table, "vivian_user_custom_instructions");
+              ciFallbackRows.set(payload.user_id, { ...payload });
+              return Promise.resolve({ data: payload, error: null });
             },
             async maybeSingle() {
-              return { data: rows.get(filterUserId) ?? null, error: null };
+              if (table === "vivian_user_profiles") {
+                if (simulateMissingTable) return { data: null, error: { code: "PGRST205", message: "missing table" } };
+                return { data: rows.get(filterUserId) ?? null, error: null };
+              }
+              assert.equal(table, "vivian_user_custom_instructions");
+              return { data: ciFallbackRows.get(filterUserId) ?? null, error: null };
             },
             async single() {
               return { data: upserted, error: null };
@@ -213,7 +235,28 @@ test("/api/user-profile isolates profiles per account ID and marks Sorachan acco
   assert.equal(getSecond.profile.displayName, "");
   assert.equal(getSecond.profile.onboarded, false);
 
-  // 4. Sorachan account defaults to onboarded: true and "โซระจัง"
+  // 4. Even when vivian_user_profiles migration is missing, fallback saves & reads cleanly under profile:${userId}
+  simulateMissingTable = true;
+  const fallbackPatch = await route.PATCH(
+    new Request("https://vivian.example/api/user-profile", {
+      method: "PATCH",
+      body: JSON.stringify({
+        displayName: "คุณฮูเต๋า",
+        relationship: "senior_junior",
+        pronouns: "เรียกคุณฮูเต๋า",
+        styleNotes: "ชอบเกม",
+        onboarded: true,
+      }),
+    }),
+  );
+  assert.equal(fallbackPatch.status, 200);
+  assert.ok(ciFallbackRows.has("profile:user-2"));
+  const fallbackGet = await (await route.GET(new Request("https://vivian.example/api/user-profile"))).json();
+  assert.equal(fallbackGet.profile.displayName, "คุณฮูเต๋า");
+  assert.equal(fallbackGet.profile.onboarded, true);
+
+  // 5. Sorachan account defaults to onboarded: true and "โซระจัง"
+  simulateMissingTable = false;
   activeUser = { id: "user-sora", email: "suphloeksangko@gmail.com" };
   const getSora = await (await route.GET(new Request("https://vivian.example/api/user-profile"))).json();
   assert.equal(getSora.isSorachan, true);
@@ -265,7 +308,7 @@ test("UserOnboardingModal and UserProfileSettingsCard render onboarding fields a
   assert.match(cardText, /ตั้งค่าชื่อและโปรไฟล์ของคุณ/);
 });
 
-test("/api/chat injects the user's onboarded profile for non-Sorachan accounts and strips Sora/Ryuka canon while keeping Sorachan intact", async () => {
+test("/api/chat strictly isolates non-Sorachan accounts (even before onboarding) and sanitizes legacy assistant turns", async () => {
   const { createRequire } = await import("node:module");
   const { webcrypto } = await import("node:crypto");
   const req = createRequire(import.meta.url);
@@ -286,8 +329,8 @@ test("/api/chat injects the user's onboarded profile for non-Sorachan accounts a
     ],
   ]);
 
-  let currentUser = { id: "u-new", email: "min@example.com" };
-  const groqPrompts = [];
+  let currentUser = { id: "u-unonboarded", email: "hutao84612@gmail.com" };
+  const groqPayloads = [];
 
   const globals = {
     crypto: webcrypto,
@@ -307,8 +350,8 @@ test("/api/chat injects the user's onboarded profile for non-Sorachan accounts a
     },
     fetch: async (_url, options) => {
       const body = JSON.parse(options.body);
-      groqPrompts.push(body.messages[0].content);
-      return Response.json({ choices: [{ message: { content: "[playful] สวัสดีค่ะคุณมิน" } }] });
+      groqPayloads.push(body);
+      return Response.json({ choices: [{ message: { content: "[playful] สวัสดีค่ะ" } }] });
     },
   };
 
@@ -344,11 +387,13 @@ test("/api/chat injects the user's onboarded profile for non-Sorachan accounts a
       "@/lib/vivian-persona": personaMod,
       "@/lib/vivian-story": storyMod,
       "@/lib/user-profile": userProfileMod,
+      "@/lib/user-profile-store": userProfileStoreMod,
       "@/lib/companion-store": {
         loadCompanionState: async () => companion.defaultCompanionState(),
         saveCompanionState: async () => {},
       },
       "@/lib/elevenlabs-voice": { resolveElevenLabsVoiceId: async () => "v1" },
+      "@/lib/tts-session-factory": { createTtsSession: () => ({ pushDelta() {}, async finish() {}, abort() {} }) },
       "@/lib/tts-stream-session": {
         StreamingTtsSession: class {
           pushDelta() {}
@@ -402,7 +447,32 @@ test("/api/chat injects the user's onboarded profile for non-Sorachan accounts a
     globals,
   );
 
-  // 1. Non-Sorachan user with profile ("คุณมิน") gets personalized prompt without Sorachan/Ryuka
+  // 1. Non-Sorachan user who has NOT onboarded yet still NEVER gets Sorachan/Ryuka in system prompt or old assistant turns
+  const resUnonboarded = await chatRoute.POST(
+    new Request("https://vivian.example/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [
+          { role: "user", content: "Huss, Huss Huss" },
+          { role: "assistant", content: '"ฮัส ฮัส ฮัส" อะไรของแกเนี่ย โซระจัง?' },
+          { role: "user", content: "สบายดีไหม" },
+        ],
+      }),
+    }),
+  );
+  assert.equal(resUnonboarded.status, 200);
+  const unonboardedPayload = groqPayloads.at(-1);
+  const unonboardedPrompt = unonboardedPayload.messages[0].content;
+  assert.doesNotMatch(unonboardedPrompt, /Sora \(โซระจัง\)/);
+  assert.doesNotMatch(unonboardedPrompt, /แอบชอบโซระจังเงียบ ๆ/);
+  assert.doesNotMatch(unonboardedPrompt, /จินตนาการภาพโซระกับริวกะ/);
+  assert.doesNotMatch(unonboardedPrompt, /ส่วน sorachan \(โซระจัง\)/);
+  // Prior assistant reply saying โซระจัง is sanitized so the LLM won't mimic it
+  assert.doesNotMatch(unonboardedPayload.messages[2].content, /โซระจัง/);
+
+  // 2. Non-Sorachan user with profile ("คุณมิน") gets personalized prompt without Sorachan/Ryuka
+  currentUser = { id: "u-new", email: "min@example.com" };
   const resNew = await chatRoute.POST(
     new Request("https://vivian.example/api/chat", {
       method: "POST",
@@ -411,14 +481,14 @@ test("/api/chat injects the user's onboarded profile for non-Sorachan accounts a
     }),
   );
   assert.equal(resNew.status, 200);
-  const newPrompt = groqPrompts.at(-1);
+  const newPrompt = groqPayloads.at(-1).messages[0].content;
   assert.match(newPrompt, /คุณมิน/);
   assert.match(newPrompt, /ชอบคุยเรื่องเกม RPG/);
   assert.match(newPrompt, /มีความสัมพันธ์แบบรุ่นพี่-รุ่นน้อง/);
   assert.doesNotMatch(newPrompt, /แอบชอบโซระจังเงียบ ๆ/);
   assert.doesNotMatch(newPrompt, /จินตนาการภาพโซระกับริวกะ/);
 
-  // 2. Sorachan account keeps full Sorachan canon
+  // 3. Sorachan account keeps full Sorachan canon
   currentUser = { id: "u-sora", email: "suphloeksangko@gmail.com" };
   const resSora = await chatRoute.POST(
     new Request("https://vivian.example/api/chat", {
@@ -428,7 +498,7 @@ test("/api/chat injects the user's onboarded profile for non-Sorachan accounts a
     }),
   );
   assert.equal(resSora.status, 200);
-  const soraPrompt = groqPrompts.at(-1);
+  const soraPrompt = groqPayloads.at(-1).messages[0].content;
   assert.match(soraPrompt, /Sora \(โซระจัง\)/);
   assert.match(soraPrompt, /แอบชอบโซระจังเงียบ ๆ/);
   assert.match(soraPrompt, /จินตนาการภาพโซระกับริวกะ/);
