@@ -114,8 +114,8 @@ async function callGroq(
     messages,
     ...(options.firstToken ? { stream: true } : {}),
     // Qwen 3.8 instruct mode: skip chain-of-thought for fast, natural conversation.
-    ...(!options.json && !options.jsonSchema ? { reasoning_effort: "none", top_p: 0.8 } : {}),
-    temperature: options.json || options.jsonSchema ? 0 : 0.7,
+    ...(!options.json && !options.jsonSchema ? { reasoning_effort: "none", top_p: 0.9 } : {}),
+    temperature: options.json || options.jsonSchema ? 0 : 0.85,
     max_tokens: options.maxTokens ?? 2500,
     ...(options.jsonSchema
       ? { response_format: { type: "json_schema", json_schema: { name: options.jsonSchema.name, schema: options.jsonSchema.schema, strict: true } } }
@@ -340,6 +340,33 @@ function trimHistory(inputMessages: ChatMessage[]) {
   return { recent, older };
 }
 
+const repeatKey = (value: string) => value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "").slice(0, 160);
+
+/**
+ * Breaks self-reinforcing loops: when Vivian's earlier replies are identical
+ * (or near-identical) the model copies them again. Keep only the first of each
+ * repeated assistant reply, and drop duplicated user turns back to back.
+ */
+function dedupeRepeatedTurns(messages: ChatMessage[]) {
+  const seen = new Set<string>();
+  const out: ChatMessage[] = [];
+  for (const message of messages) {
+    const key = repeatKey(message.content);
+    if (message.role === "assistant" && key.length > 8) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(message);
+  }
+  return out;
+}
+
+function antiRepeatBlock(messages: ChatMessage[]) {
+  const replies = messages.filter((m) => m.role === "assistant").slice(-3).map((m) => m.content.trim().slice(0, 160)).filter(Boolean);
+  if (!replies.length) return "";
+  return `\n\n[กันพูดซ้ำ] ตอบให้ตรงกับข้อความล่าสุดของผู้ใช้เท่านั้น ห้ามใช้ประโยคเปิด/เนื้อหาเดิมจากคำตอบก่อนหน้า แม้ผู้ใช้จะพูดคล้ายเดิม ให้เปลี่ยนถ้อยคำและเดินเรื่องต่อ คำตอบล่าสุดที่ห้ามก๊อป:\n${replies.map((r) => `- ${r}`).join("\n")}`;
+}
+
 function mergeRoles(messages: ChatMessage[]) {
   const contents: ProviderMessage[] = [];
   for (const message of messages) {
@@ -478,7 +505,7 @@ export async function POST(request: Request) {
   }
   const inputMessages = (Array.isArray(body.messages) ? body.messages : []).filter((message) => message && typeof message.content === "string" && message.content.trim());
   const { recent, older } = trimHistory(inputMessages);
-  const contents = mergeRoles(recent);
+  const contents = mergeRoles(dedupeRepeatedTurns(recent));
   if (!contents.length && !hasImage) {
     return NextResponse.json({ error: "พิมพ์อะไรมาหน่อยหรือส่งรูปมาก่อนน้า" }, { status: 400 });
   }
@@ -731,7 +758,7 @@ async function chatReply(
   const boundedContext = contextualPrompt.slice(0, Math.max(0, contextBudget - profileContextBlock.length));
   // Tidy blank runs without changing precedence. LANGUAGE LOCK remains last.
   const assembled = (accountPersonaPrompt + boundedContext + profileContextBlock + customPersonaPrompt).replace(/\n{3,}/g, "\n\n");
-  const systemPrompt = assembled + languageLock(language);
+  const systemPrompt = assembled + antiRepeatBlock(recent) + languageLock(language);
   const promptContents: ProviderMessage[] = isSorachanAccount
     ? contents
     : contents.map((item) =>

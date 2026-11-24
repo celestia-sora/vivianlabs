@@ -21,6 +21,8 @@ export async function POST(request: Request) {
   form.append("tag_audio_events", "false");
   form.append("diarize", "false");
   form.append("timestamps_granularity", "none");
+  // Bias Scribe toward Vivian-specific words it commonly mishears.
+  for (const term of ["Vivian", "วิเวียน", "โซระจัง", "sorachan"]) form.append("keyterms", term);
   const requestedLanguage = incoming.get("language");
   const language = requestedLanguage === "en" || requestedLanguage === "ja" || requestedLanguage === "ko" || requestedLanguage === "zh" || requestedLanguage === "th" ? requestedLanguage : null;
   // Anchor transcription to the language selected in the companion UI; this
