@@ -2,7 +2,7 @@
 
 Meet Vivian — a shy, polite, slightly awkward tsundere AI companion with her own opinions, mood state, and memory. She chats in natural, friendly Gen Z Thai (or your locked language), remembers details that matter, sees shared images/camera frames, and responds with synchronized Live2D expressions and voice.
 
-- **Version:** `2.5.1`
+- **Version:** `2.6.0`
 - **Source code:** [github.com/celestia-sora/vivianlabs](https://github.com/celestia-sora/vivianlabs)
 - **Sign-in service:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) (Cloudflare Workers + D1)
 - **Built with:** Next.js 16.3.3, React 19, TypeScript, Tailwind CSS v4, PixiJS v6 (`pixi-live2d-display/cubism4`), Supabase, Cloudflare R2

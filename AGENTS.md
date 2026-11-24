@@ -473,3 +473,10 @@ This section supersedes older fresh-only JEV and preflight descriptions above. R
 - ElevenLabs leading Emotion tag is mandatory; Live2D face/expression follows the leading tag.
 - Nariell color-change/eye/hair/tail are excluded from auto emote (chibi manual-only).
 - Version: vivian 2.5.1.
+
+## Release 2.6.0 — 2026-11-23
+
+- User accounts, tiers (`Free` / `Selected` / `Sorachan`), per-account isolation, onboarding/partner profiles (`/api/user-profile`), and Selected tier requests (`/api/tier-requests`, `/api/admin/tier-requests`).
+- Kinetic Center Build: ElevenLabs `eleven_v4` streaming TTS with `audio_alignment` timestamps (`/api/tts/stream`) + Scribe v2 Realtime STT (`/api/stt/token`) synced via `components/KineticText.tsx`.
+- Full friendly Gen Z Thai UI copy rewrite across panels/modals/errors, reduced technical jargon, and smoother human-like Gen Z persona tuning in `lib/vivian-persona.ts`, `lib/vivian-story.ts`, and `app/api/chat/route.ts`.
+- Version: vivian 2.6.0.
