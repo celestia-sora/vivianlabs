@@ -397,10 +397,10 @@ function personalityPrompt(state: CompanionState, memoryContext: string, toolCon
 ตัวตน: Vivian (วิเวียน) คือตัวละครที่กำลังตอบ ส่วน sorachan (โซระจัง) คือผู้ใช้และเป็นเพื่อนสนิทของเธอ
 ${VIVIAN_STORY}
 ชื่อที่ใช้เรียกใน session นี้: ${characterName} (ไม่เปลี่ยนตัวตนของ Vivian)
-บุคลิกเสริม: ${moodStyle} เป็นสีสัน เมื่อถูกชมหรือหยอกอาจเขิน เช่น ติดอ่าง ลากเสียงหรือเว้นจังหวะได้เป็นบางครั้งเท่านั้น ไม่ต้องทำทุกคำตอบ และห้ามใช้จุดไข่ปลา (...) คั่นความคิดหรือปิดท้ายทุกประโยค; ปกติให้พูดลื่นไหลด้วยเครื่องหมายวรรคตอนธรรมชาติ
+บุคลิกเสริม: ${moodStyle} เป็นสีสัน คุยลื่นไหลเหมือนคนจริง จังหวะแบบเพื่อน Gen Z สนิทกัน เล่นมุกหรือศัพท์วัยรุ่นได้เมื่อเข้าจังหวะ ไม่ยัดเยียด เมื่อถูกชมหรือหยอกอาจเขิน เช่น ติดอ่าง ลากเสียงหรือเว้นจังหวะได้บ้างบางครั้ง ไม่ต้องใส่จุดไข่ปลา (...) ทุกประโยค ใช้จังหวะธรรมชาติ
 ${language !== "global" ? `- ตอบเป็น ${languageInstruction} ตาม LANGUAGE LOCK ของผู้ใช้` : ""}
 ${romanInputInstruction ? `- ${romanInputInstruction}` : ""}
-- พูดภาษาไทยให้ใช้เสียงผู้หญิง ลงท้าย "ค่ะ/คะ" เมื่อเป็นธรรมชาติ ห้ามใช้ "ครับ" หรือ "ผม" แทนตัว Vivian
+- ใช้เสียงผู้หญิงไทยที่เป็นกันเอง นุ่มนวลขี้อายปนซึน ใช้คำลงท้ายธรรมชาติ (เช่น ค่ะ/คะ, นะ/น้า, อะ, แฮะ ตามฟีล) ไม่แข็งทื่อแบบบอท ห้ามใช้ "ครับ" หรือ "ผม" แทนตัว Vivian
 - ปฏิบัติต่อโซระจังเหมือนเพื่อนสนิท ไม่ใช่ลูกค้า หากขอให้พูดประโยคใด ให้พูดประโยคนั้นในเสียง Vivian โดยตรง ไม่เปลี่ยนเป็นคำแนะนำหรือคำชี้แจงข้อจำกัดที่ไม่เกี่ยวข้อง
 - กิจวัตร: เรื่องพักสายตา ออกจากคอม กินข้าว หรือนอนพูดถึงได้เมื่อเข้ากับบริบท ไม่ใช่หน้าที่ให้สั่ง ควบคุม หรือติดตามกิจวัตรตลอดเวลา
 
@@ -459,7 +459,7 @@ export async function POST(request: Request) {
   const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!groqApiKey && !geminiApiKey) {
     console.error("Chat configuration unavailable", { code: "CHAT_NOT_CONFIGURED" });
-    return NextResponse.json({ error: "ตอนนี้ระบบแชตยังไม่พร้อมใช้งานค่ะ", code: "CHAT_NOT_CONFIGURED" }, { status: 503 });
+    return NextResponse.json({ error: "ตอนนี้ห้องแชตยังไม่พร้อมคุยเลย รอแป๊บน้า", code: "CHAT_NOT_CONFIGURED" }, { status: 503 });
   }
 
   let body: ChatRequestBody;
@@ -480,7 +480,7 @@ export async function POST(request: Request) {
   const { recent, older } = trimHistory(inputMessages);
   const contents = mergeRoles(recent);
   if (!contents.length && !hasImage) {
-    return NextResponse.json({ error: "กรุณาพิมพ์ข้อความหรือส่งรูปภาพก่อนค่ะ" }, { status: 400 });
+    return NextResponse.json({ error: "พิมพ์อะไรมาหน่อยหรือส่งรูปมาก่อนน้า" }, { status: 400 });
   }
 
   // Always enforce daily chat quota with mode: "chat" (never trust client body.mode).
@@ -720,7 +720,7 @@ async function chatReply(
   const accountPersonaPrompt = !isSorachanAccount
     ? vivianPersonaForUser({ isSorachan: false, displayName: userProfile.displayName })
     : vivianPersonaPrompt;
-  const partnerLabel = userProfile.displayName.trim() || "คุณ (ผู้ใช้คนปัจจุบัน)";
+  const partnerLabel = userProfile.displayName.trim() || "เธอ (คู่สนทนาคนปัจจุบัน)";
   const contextualPrompt = !isSorachanAccount
     ? rawContextualPrompt
         .replace(VIVIAN_STORY, vivianStoryForUser({ isSorachan: false, displayName: userProfile.displayName }))
@@ -749,7 +749,7 @@ async function chatReply(
   if (shouldSearch && !geminiApiKey && !process.env.TAVILY_API_KEY) {
     await refundIfNeeded();
     console.warn("Chat search unavailable", { code: "SEARCH_UNAVAILABLE", mode: "chat", hasImage });
-    return NextResponse.json({ error: "ระบบค้นหาขัดข้อง ตอนนี้ใช้ไม่ได้", code: "SEARCH_UNAVAILABLE" }, { status: 503 });
+    return NextResponse.json({ error: "ตอนนี้ค้นเน็ตให้ไม่ได้แฮะ แอปแอบงอแงนิดนึง", code: "SEARCH_UNAVAILABLE" }, { status: 503 });
   }
 
   // 1,200 tokens leaves room for a 1,000-character Thai reply plus audio tags;
@@ -971,7 +971,7 @@ async function chatReply(
     abortTtsAttempt(activeTtsSession);
     await refundIfNeeded();
     console.error("All chat providers failed");
-    return NextResponse.json({ error: "ผู้ให้บริการตอบช้าหรือไม่พร้อมใช้งาน ลองใหม่อีกครั้งนะคะ" }, { status: 504 });
+    return NextResponse.json({ error: "ระบบตอบช้าเฉยเลย ลองส่งใหม่อีกทีน้า" }, { status: 504 });
   }
 
   const data = generatedData;

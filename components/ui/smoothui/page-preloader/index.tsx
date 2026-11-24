@@ -382,7 +382,7 @@ const PagePreloader = ({
       )}
       role="status"
     >
-      <span className="sr-only">Loading</span>
+      <span className="sr-only">กำลังโหลด</span>
       {variant === "curtain" && (
         <CurtainVariant
           background={background}

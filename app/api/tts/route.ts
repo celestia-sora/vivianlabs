@@ -71,7 +71,7 @@ export async function POST(request: Request): Promise<Response> {
     const status = timedOut ? 504 : 502;
     console.warn("ElevenLabs TTS unavailable", { phase, elapsedMs: Date.now() - startedAt, textLength: cleanText.length, error: name });
     return NextResponse.json({
-      error: timedOut ? "ผู้ให้บริการเสียงตอบช้าเกินไป ลองใหม่อีกครั้งนะคะ" : "ผู้ให้บริการเสียงขัดข้องชั่วคราว ลองใหม่อีกครั้งนะคะ",
+      error: timedOut ? "เสียงตอบกลับช้าไปนิดนึง ลองอีกทีนะ" : "ระบบเสียงสะดุดไปแป๊บ ลองใหม่อีกทีน้า",
       code: timedOut ? "TTS_TIMEOUT" : "TTS_UPSTREAM",
       status,
     }, { status, headers: { "Cache-Control": "no-store" } });

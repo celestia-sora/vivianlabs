@@ -245,24 +245,24 @@ const CoverflowCarousel = ({
 
       <div className="mt-4 flex items-center justify-center gap-4">
         <SmoothButton
-          aria-label="Previous slide"
+          aria-label="ก่อนหน้า"
           disabled={!loop && activeIndex === 0}
           onClick={() => goTo(activeIndex - 1)}
           shape="pill"
           size="sm"
           variant="outline"
         >
-          Prev
+          ก่อนหน้า
         </SmoothButton>
         <SmoothButton
-          aria-label="Next slide"
+          aria-label="ถัดไป"
           disabled={!loop && activeIndex === total - 1}
           onClick={() => goTo(activeIndex + 1)}
           shape="pill"
           size="sm"
           variant="outline"
         >
-          Next
+          ถัดไป
         </SmoothButton>
       </div>
 

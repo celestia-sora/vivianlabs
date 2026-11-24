@@ -201,7 +201,7 @@ export function useUserProfile(accountIdHint?: string) {
       onboarded?: boolean;
     }): Promise<boolean> => {
       setSaving(true);
-      setNotice("กำลังบันทึกโปรไฟล์…");
+      setNotice("แป๊บนะ กำลังเซฟโปรไฟล์…");
       try {
         const response = await authFetch("/api/user-profile", {
           method: "PATCH",
@@ -217,7 +217,7 @@ export function useUserProfile(accountIdHint?: string) {
         });
         if (!response.ok) {
           const err = (await response.json().catch(() => ({}))) as { error?: string };
-          throw new Error(err.error || "บันทึกโปรไฟล์ไม่สำเร็จ");
+          throw new Error(err.error || "เซฟโปรไฟล์ไม่ติดแฮะ ลองอีกทีนะ");
         }
         const data = (await response.json()) as {
           userId?: string;
@@ -229,7 +229,7 @@ export function useUserProfile(accountIdHint?: string) {
           writeCache(data.userId, data.profile);
           dismissedForUserRef.current = data.userId;
         }
-        setNotice("บันทึกข้อมูลส่วนตัวแล้ว");
+        setNotice("เซฟโปรไฟล์เรียบร้อย จึ้งมาก!");
         setOnboardingOpen(false);
         return true;
       } catch (err) {
@@ -247,7 +247,7 @@ export function useUserProfile(accountIdHint?: string) {
         setProfile(localSaved);
         writeCache(fallbackUserId, localSaved);
         dismissedForUserRef.current = fallbackUserId;
-        setNotice(err instanceof Error ? err.message : "บันทึกไว้บนเครื่องนี้แล้ว");
+        setNotice(err instanceof Error ? err.message : "เซฟไว้ในเครื่องนี้ให้ก่อนน้า");
         setOnboardingOpen(false);
         return false;
       } finally {

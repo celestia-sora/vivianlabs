@@ -1,146 +1,195 @@
 # Vivian AI Companion
 
-Meet Vivian, a shy, polite tsundere AI companion with her own opinions. She can seem cool or mildly annoyed, then get flustered when you are kind to her; small moments reveal that she cares. She chats naturally, remembers things, sees shared pictures, and chooses her own responses.
+Meet Vivian — a shy, polite, slightly awkward tsundere AI companion with her own opinions, mood state, and memory. She chats in natural, friendly Gen Z Thai (or your locked language), remembers details that matter, sees shared images/camera frames, and responds with synchronized Live2D expressions and voice.
 
-- **Alpha test:** Open through November 13, 2026.
-- **Source code:** [github.com/celestia-sora/vivian](https://github.com/celestia-sora/vivian)
-- **Sign-in app:** [vivianAuth](https://github.com/celestia-sora/vivianAuth)
-- **Built with:** Next.js, React, TypeScript, Supabase (app data), Cloudflare Workers + D1 (sign-in), PixiJS
+- **Version:** `2.5.1`
+- **Source code:** [github.com/celestia-sora/vivianlabs](https://github.com/celestia-sora/vivianlabs)
+- **Sign-in service:** [vivianAuth](https://github.com/celestia-sora/vivianAuth) (Cloudflare Workers + D1)
+- **Built with:** Next.js 16.3.3, React 19, TypeScript, Tailwind CSS v4, PixiJS v6 (`pixi-live2d-display/cubism4`), Supabase, Cloudflare R2
+
+---
 
 ## Get her running ✨
 
-You’ll need Git, Node.js 22.13 or newer, and npm. Then pop open a terminal and run:
+You’ll need Git, Node.js 22+, and npm. Open a terminal and run:
 
 ```bash
-git clone https://github.com/celestia-sora/vivian.git
-cd vivian
+git clone https://github.com/celestia-sora/vivianlabs.git
+cd vivianlabs
 npm ci
 cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and say hi 💜 On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`.
+On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`.
 
-Local preview without real sign-in: `NODE_ENV=development` + `DEV_BYPASS_LOGIN=true`. This bypass is never honored in production.
+Open [http://localhost:3000](http://localhost:3000) to chat with Vivian 💜
+
+For local preview without signing in via vivianAuth, set `NODE_ENV=development` and `DEV_BYPASS_LOGIN=true` in `.env.local` (never honored in production).
+
+---
 
 ## Set up services
 
-Add service keys to `.env.local` to wake up the features you want. See [.env.example](.env.example) for the full list and defaults.
+Configure credentials in `.env.local` for the capabilities you want to enable. See [.env.example](.env.example) for defaults.
 
 | Service | Environment variables |
 | --- | --- |
-| Chat | `GROQ_API_KEY` (primary chat + memory); optional `GEMINI_API_KEY` for fallback and search |
-| Vision | Groq Qwen 3.8 27B vision only (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`) |
-| Sign-in | `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` (must match vivianAuth's Cloudflare secret) |
-| Cloud memory & history | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
-| Voice input | `ELEVENLABS_API_KEY` |
-| Voice output | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` |
-| Search | `GEMINI_API_KEY`; optional `TAVILY_API_KEY` |
-| JEV decisions | `TYPESAFE_API_KEY` or `JEV_API_KEY` |
-| Cloud models and backgrounds | Optional Cloudflare R2 setup; see [R2 guide](docs/private-r2-storage.md) |
+| Primary chat & memory | `GROQ_API_KEY`, `GROQ_MODEL` (default `qwen/qwen3.8-27b`), `GROQ_MEMORY_MODEL` (default `openai/gpt-oss-20b`), optional `GEMINI_API_KEY` (`GEMINI_MODEL`, default `gemini-2.5-flash`) |
+| Vision | Groq only via `GROQ_VISION_MODEL` (default `qwen/qwen3.8-27b`, no Gemini fallback) |
+| Sign-in bridge | `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` (must match vivianAuth's Cloudflare secret) |
+| App database | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, optional `SUPABASE_STORAGE_LIMIT_BYTES`; optional `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for Supabase Realtime only |
+| Speech-to-Text & TTS | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` |
+| Web search | `GEMINI_API_KEY`; optional `TAVILY_API_KEY` |
+| JEV decision layer | `TYPESAFE_API_KEY` (or `JEV_API_KEY`), `JEV_ENABLED`, `JEV_DEBUG` |
+| Private cloud storage | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `SCENE_STORAGE_PROVIDER=r2` (see [R2 guide](docs/private-r2-storage.md)) |
 
-Tiny but important: keep secret keys server-side only. Never put provider, service-role, or R2 secrets in variables starting with `NEXT_PUBLIC_` (｡•́︿•̀｡) `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are only for the Realtime config endpoint — Supabase is not used for sign-in.
+Keep provider API keys, Supabase service-role keys, and R2 credentials server-side only — never place privileged secrets in `NEXT_PUBLIC_*` environment variables.
 
-## Sign-in & privacy 🔒
+---
 
-Sign-in is delegated to the Cloudflare Workers app [vivianAuth](https://github.com/celestia-sora/vivianAuth) (D1-backed). The app validates session tokens server-side via vivianAuth's `POST /api/verify` — set `VIVIANAUTH_URL` + `VIVIAN_INTERNAL_TOKEN` on Vercel (same secret as on vivianAuth's Cloudflare secrets). Flow: vivianAuth redirects with `#token=<session>` → stored in `localStorage vivian_auth_token` → sent as `Authorization: Bearer` on every API call → verified server-side (8s timeout, HTTPS only). Logout revokes via vivianAuth `POST /api/logout`. Supabase stores only app data (memory, chat history, scenes, voice prefs, custom instructions) — not sign-in.
+## Sign-in, privacy & account tiers 🔒
 
-All authorized accounts share the same cloud memories, chat history, and companion relationship state. Chat history syncs through Supabase across devices, with a browser cache for unsynced messages. Imported Live2D models stay in that browser unless you choose to save them to private cloud storage.
+Sign-in is delegated to [vivianAuth](https://github.com/celestia-sora/vivianAuth) (D1-backed). After login, vivianAuth redirects back with `#token=<session>`, which the client stores in `localStorage` (`vivian_auth_token`) and sends via `Authorization: Bearer` headers. Every API route verifies tokens server-side against vivianAuth `POST /api/verify`, and sign-out revokes sessions via `POST /api/logout`. Supabase stores application data only — never sign-in identities.
 
-**Menu → Settings** includes sign-out and **Reset Vivian**. Reset clears shared cloud memories, conversation history, and relationship state, along with this device's chat history and local settings and the shared custom instructions. It keeps imported models and does not sign you out.
+### Per-account isolation
 
-Keep row-level security (RLS) enabled on Supabase memory tables, with no public read or write policies. The server checks account access before handling protected requests.
+Each verified account gets its own isolated companion data in Supabase:
 
-## What Vivian gets up to ♡
+- **Partner onboarding & profile (`/api/user-profile`):** New non-Sorachan users are greeted with a quick Gen Z Thai onboarding modal (`เพื่อนซี้`, `เพิ่งรู้จักกัน`, `รุ่นพี่ / รุ่นน้อง`, or `คนคุย / คนพิเศษ`, plus nickname, optional pronouns, and chat vibe notes) and talk with an isolated Vivian persona that excludes Sorachan/Ryuka lore. Designated Sorachan accounts preserve the original canon setup.
+- **Memories, chat history & relationship state:** Conversations, durable memories, mood/affinity state, custom instructions (with version history), voice preferences (`voiceId` and `speechLanguage`), private scenes, and cloud models are scoped per account (`user_id`).
+- **Reset Vivian:** Available under **Menu → Settings** (`เริ่มใหม่กับ Vivian (รีเซ็ต)`). Clears that account's cloud conversations, messages, memories, consolidation runs, relationship state, and local device chat cache while keeping imported Live2D models, voice settings, login session, and saved custom instructions.
 
-- **Chat on her terms:** Groq’s Qwen 3.8 27B provides chat and GPT-OSS 20B handles memory extraction/compression; Gemini is the optional fallback for search, but Vivian is intentionally not a general-purpose assistant. She can answer, tease, dodge, give half an answer, or refuse.
-- **Chat history:** Conversations and messages sync through Supabase across devices under the existing shared companion identity. Local copies retain unsynced messages during outages. Existing device history is imported with stable IDs to prevent duplicates. Apply `supabase/migrations/20261006005533_cloud_conversation_history.sql` before deploying this feature.
-- **Remember:** Keeps durable relationship-relevant details and mood state. Secrets and sensitive one-off details aren’t saved automatically.
-- **Know things:** Search, Bangkok time/weather, calculation, and memory tools can give Vivian context. Tool results are knowledge, not an obligation to tell you the answer.
-- **See pictures:** Send an image or camera frame. Vision runs on Groq Qwen 3.8 27B (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`) — no Gemini fallback.
-- **Talk:** ElevenLabs Scribe v2 handles speech input in the selected UI language (th/en/ja/ko/zh) and Eleven v4 generates speech output (set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`); the mic waits for 2.5 seconds of silence before sending. Vivian’s avatar lip-syncs while she talks. If voice or Live2D has a bad hair day, text chat still works.
-- **Personality:** Vivian uses the owned shy, polite tsundere persona prompt across dialogue providers, with Thai as the default language. A leading Emotion tag is mandatory for voice; it guides ElevenLabs delivery, drives Live2D face sync, and is removed from spoken words. She may initially deflect questions about herself and relent after 3–4 persistent follow-up turns on the same topic. Custom instructions adjust conversation preferences and apply to the next text or microphone turn.
-- **Chat in your language:** Automatic, Thai, English, Japanese, Korean, and Chinese.
-- **Set the scene:** Add your own labeled backgrounds. Scene images stay private and aren’t analyzed by AI.
+### Tier matrix
 
-External app actions are currently unavailable. MCP servers have not been connected yet.
+Any confirmed, non-anonymous vivianAuth D1 account starts on the **Free** tier:
 
-### A little extra smarts: JEV
+| Tier | Daily chat quota (Bangkok midnight reset) | Live2D models & custom scenes |
+| --- | --- | --- |
+| **Free** | 5 chats / day | Local browser IndexedDB model imports (<= 512 MiB) & preset backgrounds (`Christmas Day` / `Night`); Cloud R2 disabled |
+| **Selected** | 20 chats / day | `512 MiB` personal Cloud R2 quota for synced Live2D packages & private uploaded scenes |
+| **Sorachan** | Unlimited | Shared `8 GB` Cloud R2 budget (`2 GB` safety buffer kept free) + admin controls for reviewing Selected tier requests |
 
-JEV is an optional decision service. It decides when fresh information, memory, or supported tools may be relevant; it never decides that Vivian owes the user a useful answer. Vivian's main language model still writes the conversation. JEV receives a small amount of recent chat text and feature availability, not stored memories, images, audio, or secret keys. If JEV is unavailable, chat uses its regular routing. See [JEV architecture](docs/jev-decision-layer.md).
+Users on **Free** can request **Selected** access directly from the in-app modal via `/api/tier-requests`.
 
-## Give Vivian a look ✨
+Keep row-level security (RLS) enabled on Supabase tables with no public read or write policies; server routes enforce bearer verification and account ownership before reading or mutating data.
 
-Import a model you’re licensed to use from **Character → Models**. Choose a ZIP file or folder with the model manifest and all referenced files. Vivian supports Cubism 4 models and packages with multiple outfits—cute outfit changes included (｡˃ ᵕ ˂ ).
+---
 
-Models are checked and stored in the browser. You can optionally save them to private R2 storage to use them on another device. Each model archive and expanded package must be 512 MiB or smaller. Without a model, text chat still works.
+## What Vivian does ♡
 
-Model files are not included in Git or the deployment. Do not put licensed models under `public/`; files in that folder can be accessed publicly.
+- **Character-first Gen Z Thai conversation:** Driven by `lib/vivian-persona.ts` and `lib/vivian-story.ts` across providers (`Groq` primary, optional `Gemini` fallback). Vivian keeps her shy, polite tsundere core with smoother Gen Z Thai phrasing, optional memes in natural spots, and non-robotic UI/error copy across the app.
+- **Per-account memory & consolidation:** Extracts durable preferences/facts (`GROQ_MEMORY_MODEL`, default `openai/gpt-oss-20b`), retrieves hybrid recall context, and summarizes/consolidates via `/api/memory` and `/api/memory/consolidate`. See [Memory system](docs/memory-system.md).
+- **Web search & tools:** Optional search (`GEMINI_API_KEY` / `TAVILY_API_KEY`), calculator, weather, and Bangkok time tools supply context to Vivian without forcing assistant-style answers.
+- **Vision:** Send image uploads or live camera frames (front/rear camera toggle). Uses Groq Qwen vision (`GROQ_VISION_MODEL`) exclusively.
+- **Realtime voice & lip-sync:**
+  - **Speech-to-Text:** ElevenLabs Scribe v2 Realtime (`/api/stt/token`) with batch `/api/stt` fallback anchored to the selected language (`th`, `en`, `ja`, `ko`, `zh`, or `global` auto).
+  - **Text-to-Speech:** ElevenLabs `eleven_v4` Text-to-Dialogue (`/api/tts` and `/api/tts/stream`) emits inline audio tags (stripped before display, kept in TTS synthesis) and word alignment timestamps (`audio_alignment`) for synchronized [`KineticText`](components/KineticText.tsx) playback + Live2D `ParamMouthOpenY` lip-sync. Set `TTS_ALIGNMENT=off` to fall back to unaligned streaming. See [Thai TTS audit](docs/tts-thai.md).
+  - **Voice & custom instruction sync:** Per-account ElevenLabs `Voice ID` and speech language persist via `/api/voice/preferences`; custom instructions (`<= 2000` chars) save per account with up to 10 restorable versions via `/api/custom-instructions`.
+- **Optional JEV decision layer:** Analyzes recent turns and tool availability to decide when memory, tools, or scenes may help — never overrides Vivian's persona rules. See [JEV architecture](docs/jev-decision-layer.md).
 
-## Make her space yours 🌷
+---
 
-Add a scene in **Scenes** with a short label and a JPG, PNG, WebP, or AVIF image, or import an image from an HTTP(S) URL. Vivian uses the label to identify the scene; it does not inspect the image. Scenes are manual-only for now — pick one in **Scenes**; automatic switching is disabled.
+## Live2D avatars ✨
 
-Scenes need the migration `20261003032056_dynamic_scenes.sql` applied to Vivian's Supabase project. See [Dynamic scenes](docs/dynamic-scenes.md) for details.
+Import licensed Cubism 4 packages (`.zip` or unpacked folder, up to `512 MiB` archive and expanded size) in **Character → Models** (**ตัวละคร → โมเดล**):
 
-Cloudflare R2 is optional. It stores private model packages and new scene images. The shared storage limit is 8 GB, with 2 GB held back as a buffer. The app's **Menu → Status** panel shows storage use. Follow the [R2 setup guide](docs/private-r2-storage.md) before enabling it. Existing Supabase scene images remain available.
+- Inspects manifests and discovers undeclared `.exp3.json` expressions, poses, and `.motion3.json` groups locally via revocable Blob URLs (`lib/local-models.ts`).
+- Adapts large texture atlases for GPU and mobile/desktop RGBA memory budgets (`128 MiB` desktop / `64 MiB` mobile) via `lib/model-textures.ts` and `lib/png-render-copy.ts` without modifying original packages stored in IndexedDB.
+- **Selected** and **Sorachan** accounts can optionally sync models to private Cloud R2 storage (`lib/cloud-models.ts`). Models are never checked into Git or `public/`. Text chat continues working smoothly even without a loaded Live2D model.
+
+---
+
+## Custom scenes 🌷
+
+Upload JPG, PNG, WebP, or AVIF backgrounds (`<= 8 MB`) or import via HTTP(S) URL with SSRF protection (`lib/scene-images.ts`) in **Scenes** (**ฉากหลัง**). Scene uploads require **Selected** or **Sorachan** tier; **Free** accounts retain the built-in `Christmas Day` / `Christmas Night` presets. Scene images remain private and are never inspected by vision models. See [Dynamic scenes](docs/dynamic-scenes.md).
+
+---
 
 ## Main API routes
 
-All protected routes check sign-in via vivianAuth (`requireApiAccess`) and account access.
+All protected API routes verify vivianAuth tokens and enforce account/tier permissions server-side:
 
-| Route | What it does |
+| Route | Purpose |
 | --- | --- |
-| `/api/chat` | Chat, search, image understanding, and tools |
-| `/api/conversations` | GET paginated shared conversations/messages; PUT validated, idempotent message batches |
-| `/api/custom-instructions` | GET/PATCH the shared custom instructions used by every device |
-| `/api/memory` | Read and manage memories and conversation data |
-| `/api/stt` | Convert speech to text (UI language honored); batch fallback when realtime is unavailable |
-| `/api/stt/token` | Mint a single-use ElevenLabs Scribe v2 Realtime token for the browser (API key stays server-side) |
-| `/api/tts` | Generate speech audio |
-| `/api/scenes/*` | Manage backgrounds |
-| `/api/models/*` | Manage private Live2D models |
-| `/api/storage/status` | Show storage use |
-| `/api/jev/status` | Show whether JEV is configured |
+| `/api/account` | Account tier, capabilities, daily quota, storage usage, profile, and tier request status |
+| `/api/chat` | Chat generation (Groq primary / optional Gemini fallback), search, vision, memory updates, and NDJSON streaming |
+| `/api/conversations` | Paginated per-account chat history and idempotent message batch sync |
+| `/api/custom-instructions` | Per-account custom instructions and recoverable version history |
+| `/api/user-profile` | Per-account onboarding status, nickname, relationship preset, and vibe notes |
+| `/api/memory` & `/api/memory/consolidate` | Memory CRUD and idle/batch memory consolidation |
+| `/api/voice/preferences` | Per-account ElevenLabs `voiceId` and `speechLanguage` sync |
+| `/api/stt` & `/api/stt/token` | Batch Speech-to-Text and single-use Scribe v2 Realtime browser tokens |
+| `/api/tts` & `/api/tts/stream` | ElevenLabs `eleven_v4` audio synthesis and aligned streaming output |
+| `/api/models/*` & `/api/models/preference` | Private Live2D cloud packages, asset uploads, expression prefs, and active model sync |
+| `/api/scenes/*` | Custom background upload, URL preview, authenticated image proxy, and active scene preferences |
+| `/api/storage/status` | Personal Cloud R2 or shared Supabase + R2 usage meter |
+| `/api/tier-requests`, `/api/tier-requests/review`, `/api/admin/tier-requests` | Selected tier request submission, signed review links, and Sorachan admin management |
+| `/api/realtime/config` | Authenticated Supabase Realtime connection config |
+| `/api/jev/status` | JEV decision service availability status |
 
-**Kinetic Center Build.** Streamed chat speech uses ElevenLabs Text-to-Dialogue `stream/with-timestamps` (`eleven_v4`) and emits `audio_alignment` NDJSON events beside `audio_chunk`; the client reveals words from the audio playback clock. Live user speech comes from Scribe v2 Realtime (partial/committed events). Both render through the shared `KineticText` component with separate sync controllers. Set `TTS_ALIGNMENT=off` to fall back to the unaligned WebSocket path.
+---
 
 ## Developer corner 🛠️
 
+### Build & quality checks
+
 ```bash
-npm run lint
 npx tsc --noEmit
+npm run lint
 npm run build
 ```
 
-Performance checks: `npm run test:performance` and `npm run test:performance:browser`. See [Performance Sprint measurements and timing guide](docs/performance-sprint.md) for the reproducible before/after fixture, local User Timing entries, cache limits and device verification. Scenes display optimistically, and model swaps retain the prior stage until the new first frame. Web chat opts into timing-only NDJSON events with `Accept: application/x-ndjson`; existing JSON API clients keep their response contract.
+### Verification & test scripts
 
-Run feature tests with scripts such as `npm run test:auth`, `npm run test:jev`, `npm run test:models`, `npm run test:scenes`, and `npm run test:storage`. Some integration tests need local fixtures or PostgreSQL; check the relevant docs first. Do not point tests at production data.
+Run feature and regression suites (do not point integration tests at production databases):
 
-Apply required Supabase migrations before deploying features — especially `20261006005533_cloud_conversation_history.sql` (chat history), `20261105090000_custom_instructions.sql` (custom instructions), `20261107120000_drop_auth_fk.sql` (D1 identities), `20261107133000_model_expression_preferences.sql`, and `20261105200000_voice_id_preference.sql`. See [R2 guide](docs/private-r2-storage.md), [Dynamic scenes](docs/dynamic-scenes.md), [JEV architecture](docs/jev-decision-layer.md), and [Thai TTS audit](docs/tts-thai.md) for feature details.
+```bash
+npm run test:persona
+npm run test:persona:eval
+npm run test:models
+npm run test:scenes
+npm run test:storage
+npm run test:auth
+npm run test:voice-preferences
+npm run test:custom-instructions
+npm run test:performance
+```
 
-## Project folders
+Additional targeted suites such as `tests/user-profile.test.mjs`, `tests/tier-ui.test.mjs`, `tests/tier-api.test.mjs`, `tests/companion.test.mjs`, `tests/speech.test.mjs`, and `tests/tts.test.mjs` can be run with `node --experimental-strip-types --test <file>`. See [Performance Sprint guide](docs/performance-sprint.md) for browser performance checks (`npm run test:performance:browser`).
 
-- `app/` — Pages, sign-in hop shim, and API routes
-- `lib/` — Chat, memory, authentication, Live2D, and storage logic
-- `supabase/migrations/` — Database changes
-- `docs/` — Setup and architecture guides
+### Supabase migrations
+
+Apply migrations in `supabase/migrations/` in chronological order before deploying matching features — notably:
+
+- `20261003032056_dynamic_scenes.sql` (custom scenes)
+- `20261005131311_private_r2_storage.sql` & `20261005152924_shared_r2_budget.sql` (private R2 storage & quota)
+- `20261006005533_cloud_conversation_history.sql` (cloud conversation history)
+- `20261105090000_custom_instructions.sql`, `20261109000000_custom_instruction_versions.sql`, `20261112100000_account_custom_instructions.sql` (per-account custom instructions + versions)
+- `20261105200000_voice_id_preference.sql` & `20261107120000_drop_auth_fk.sql` (voice preferences & vivianAuth D1 identities)
+- `20261201000000_memory_v2.sql` (Memory v2)
+- `20261202000000_user_tiers_and_isolation.sql` (account tiers, daily chat quotas, and per-account isolation)
+- `20261203000000_user_profiles_onboarding.sql` (onboarding & partner profiles)
+
+---
+
+## Project structure
+
+- `app/` — Pages (`/`, `/login`, `/access-denied`), Live2D companion UI (`app/companion.tsx`), components (`app/components/`), and API routes (`app/api/`)
+- `components/` — `KineticText` synchronized speech component (`components/KineticText.tsx`) and reusable `smoothui` interaction/upload/carousel/text primitives (`components/ui/smoothui/`)
+- `lib/` — Persona prompts, LLM/JEV routing, memory v2, auth policy/verify bridge, tier quotas, Live2D loaders, texture planning, and voice streaming
+- `supabase/migrations/` — PostgreSQL schema migrations
+- `docs/` — Architecture, storage, memory, persona, TTS, and performance docs
+- `tests/` — Unit, integration, persona eval, and performance tests
 
 ## Technical notes
 
-- Live2D uses PixiJS 6 and `pixi-live2d-display/cubism4`. Keep PixiJS on version 6.
-- Load Live2D in the browser only; Cubism Core must load before the model.
-- Keep provider credentials and service-role keys on the server.
-- Require a confirmed, non-anonymous D1 account whose verified email is `suphloeksangko@gmail.com` or `duckchan690@gmail.com` (verified via vivianAuth `/api/verify`) for protected app access.
-- Verify bearer tokens, never trust client-supplied identity or claims.
-- Optional services can fail without stopping text chat.
+- Live2D requires PixiJS v6 (`pixi.js@^6.5.10`) and `pixi-live2d-display/cubism4`. Do not upgrade PixiJS to v7+.
+- Live2D loads strictly client-side after Cubism Core (`public/live2d/live2dcubismcore.min.js`) is loaded via `<Script strategy="beforeInteractive">`.
+- All provider keys and storage secrets stay on the server; client requests authenticate through bearer tokens verified against vivianAuth.
+- External MCP servers are not connected yet.
+- Optional features (voice, Live2D models, JEV, web search, cloud storage) degrade gracefully so text chat remains available.
 
-## License and assets
+## License & assets
 
-This repository contains Vivian's application code. Models and other assets may have separate license terms. Live2D credit: **sorachan**. Make sure a model's license allows your intended use and private cloud storage.
-
-Thai Text-to-Speech prepares a separate spoken version of replies (contextual number readings, Markdown cleanup and preserved stammers). See [Thai TTS audit and listening checklist](docs/tts-thai.md); voice identity and loudness settings remain unchanged.
-
-Speaking speed is shared across all authorized accounts via `/api/voice/preferences`. Apply `supabase/migrations/20261007030145_global_voice_preferences.sql` before using it. The client reloads the cloud value on opening, focus and every 15 seconds while visible; the latest completed save wins. Cloud failures are shown in Voice with a retry control. Voice volume and language remain unchanged.
-
-Custom instructions are also shared across every authorized device via `/api/custom-instructions`. Apply `supabase/migrations/20261105090000_custom_instructions.sql` before deploying. Settings keeps an explicit **Save** button: edits stay in the textarea and only the saved value is used by chat, and the client refreshes the shared value on opening, focus and every 15 seconds. A device with pre-sync local instructions uploads them on its first successful sync instead of losing them. Reset Vivian clears the shared custom instructions too.
+This repository contains Vivian's application code. Models and other assets remain subject to their respective license terms. Live2D credit: **sorachan**. Ensure any imported model license permits your usage and private cloud storage.

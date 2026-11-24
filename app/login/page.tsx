@@ -46,7 +46,7 @@ export default function LoginPage(): React.JSX.Element {
   return (
     <main style={{ display: "grid", placeItems: "center", minHeight: "100dvh", background: "#e0d6ff", color: "#241329" }}>
       <p role="status" style={{ fontSize: 16 }}>
-        {phase === "forwarding" ? "กำลังพาไปหน้าล็อกอิน…" : "กำลังตรวจสอบการล็อกอิน…"}
+        {phase === "forwarding" ? "แป๊บนึง กำลังพาไปหน้าล็อกอิน…" : "แป๊บนะ กำลังเช็กการล็อกอินให้…"}
       </p>
     </main>
   );

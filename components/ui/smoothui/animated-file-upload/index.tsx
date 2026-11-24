@@ -129,7 +129,7 @@ export default function AnimatedFileUpload({
         const oversized = newFiles.filter((f) => f.size > maxSize);
         if (oversized.length > 0) {
           setError(
-            `${oversized.length} file(s) exceed the ${formatFileSize(maxSize)} limit`
+            `มี ${oversized.length} ไฟล์ใหญ่เกิน ${formatFileSize(maxSize)} น้า`
           );
           return newFiles.filter((f) => f.size <= maxSize);
         }
@@ -251,7 +251,7 @@ export default function AnimatedFileUpload({
               ? { scale: 1.02 }
               : { scale: 1 }
         }
-        aria-label="File upload area. Drag and drop files or press to browse"
+        aria-label="พื้นที่อัปโหลดไฟล์ ลากไฟล์มาวางหรือกดเลือกได้เลย"
         className={cn(
           "relative flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -284,12 +284,12 @@ export default function AnimatedFileUpload({
               shouldReduceMotion ? { duration: 0 } : { duration: 0.15 }
             }
           >
-            {isDragOver ? "Drop files here" : "Drag & drop or click to upload"}
+            {isDragOver ? "ปล่อยไฟล์ตรงนี้ได้เลย!" : "ลากไฟล์มาวาง หรือจิ้มเลือกไฟล์"}
           </motion.p>
         </AnimatePresence>
         <p className="mt-1 text-muted-foreground text-xs">
-          {accept ? accept.replace(/,/g, ", ") : "Any file type"}
-          {maxSize ? ` \u2022 Max ${formatFileSize(maxSize)}` : null}
+          {accept ? accept.replace(/,/g, ", ") : "ไฟล์แบบไหนก็ได้"}
+          {maxSize ? ` \u2022 ไม่เกิน ${formatFileSize(maxSize)}` : null}
         </p>
       </motion.div>
 

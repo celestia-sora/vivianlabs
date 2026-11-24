@@ -25,13 +25,13 @@ export class SceneError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 export function validateSceneLabel(value: unknown): string {
-  if (typeof value !== "string") throw new SceneError("Enter a scene label (1–50 characters).");
+  if (typeof value !== "string") throw new SceneError("ตั้งชื่อฉากสั้น ๆ 1–50 ตัวอักษรหน่อยนะ");
   const label = value.trim().normalize("NFC");
-  if (!label || [...label].length > 50 || /[\p{Cc}\p{Cf}<>]/u.test(label)) throw new SceneError("Enter a scene label (1–50 characters, without markup or control characters).");
+  if (!label || [...label].length > 50 || /[\p{Cc}\p{Cf}<>]/u.test(label)) throw new SceneError("ชื่อฉากขอแค่ 1–50 ตัวอักษร แบบไม่มีโค้ดหรืออักขระแปลก ๆ น้า");
   return label;
 }
 export function validateSceneId(value: unknown): string {
-  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new SceneError("Scene not found.", 404);
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new SceneError("หาฉากนี้ไม่เจอแฮะ", 404);
   return value;
 }
 
@@ -41,7 +41,7 @@ export function sceneThumbnailKey(key: string): string {
 export function sceneImageExtension(mime: string): string {
   const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/avif": "avif" };
   const extension = extensions[mime];
-  if (!extension) throw new SceneError("Unsupported scene image type.");
+  if (!extension) throw new SceneError("ไฟล์รูปนี้ยังไม่รองรับอะ ใช้ JPG, PNG, WebP หรือ AVIF แทนนะ");
   return extension;
 }
 

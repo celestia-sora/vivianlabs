@@ -75,7 +75,7 @@ async function availableModelPackage(pack: ModelPackage, cloud: CloudLibrary | P
       const library = await cloud;
       sharedSignal.throwIfAborted();
       const remote = library?.models.find((model) => model.id === pack.id);
-      if (!remote || !library) throw new Error("Model files are unavailable on this device. Reconnect to the cloud or import the original model again.");
+      if (!remote || !library) throw new Error("หาไฟล์โมเดลในเครื่องไม่เจอแฮะ ลองต่อ Cloud หรือโยนไฟล์โมเดลเข้ามาใหม่อีกรอบนะ");
       const downloaded = await downloadCloudModel(remote, library.userId, sharedSignal);
       await saveModelPackage(downloaded).catch(() => {});
       return downloaded;
@@ -103,19 +103,19 @@ function modelExpressionPreferenceKey(packageId: string, manifestPath: string): 
   return `vivian-model-expressions:${packageId}:${manifestPath}`;
 }
 const LANGUAGE_OPTIONS: Array<{ code: SpeechLanguage; label: string; nativeName: string }> = [
-  { code: "global", label: "ทุกภาษา", nativeName: "Global" },
-  { code: "th", label: "Thai", nativeName: "TH" },
-  { code: "en", label: "English", nativeName: "EN" },
-  { code: "ja", label: "Japanese", nativeName: "JP" },
-  { code: "ko", label: "Korean", nativeName: "KR" },
-  { code: "zh", label: "Chinese", nativeName: "CN" },
+  { code: "global", label: "ทุกภาษา (จับตามที่คุย)", nativeName: "Global" },
+  { code: "th", label: "ภาษาไทย", nativeName: "TH" },
+  { code: "en", label: "ภาษาอังกฤษ", nativeName: "EN" },
+  { code: "ja", label: "ภาษาญี่ปุ่น", nativeName: "JP" },
+  { code: "ko", label: "ภาษาเกาหลี", nativeName: "KR" },
+  { code: "zh", label: "ภาษาจีน", nativeName: "CN" },
 ];
 // Quick actions shown as a frosted glass row above the orb on double-tap.
 const ORB_DIRECTIONS: Array<{ key: OrbDirection; icon: IconName; label: string }> = [
-  { key: "mic", icon: "mic", label: "mic" },
-  { key: "camera", icon: "video", label: "cam" },
-  { key: "type", icon: "message", label: "chat" },
-  { key: "settings", icon: "config", label: "setting" },
+  { key: "mic", icon: "mic", label: "ไมค์" },
+  { key: "camera", icon: "video", label: "กล้อง" },
+  { key: "type", icon: "message", label: "พิมพ์" },
+  { key: "settings", icon: "config", label: "ตั้งค่า" },
 ];
 const BACKGROUNDS = { day: "/backgrounds/christmas-day-4x3.jpg", night: "/backgrounds/christmas-night-4x3.jpg" } as const;
 const PRESET_SCENE_IMAGES = Object.values(BACKGROUNDS);
@@ -443,7 +443,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       setModelStatus("error");
       setStartupModelPending(false);
       setModelSwitchPending(false);
-      setModelNotice((notice) => notice ?? "Model is taking longer than expected. It will keep loading in the background — you can chat meanwhile.");
+      setModelNotice((notice) => notice ?? "โมเดลนี้โหลดนานนิดนึง เดี๋ยวให้โหลดต่อข้างหลัง ระหว่างนี้ทักแชตคุยกับวิเวียนไปก่อนได้เลย!");
     }, 30_000);
     return () => window.clearTimeout(timer);
   }, [live2dBusy]);
@@ -451,18 +451,18 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     const isFocused = model.id === (pendingModelId ?? activeModelId);
     let badge: CoverflowCarouselItem["badge"];
     if (isFocused && live2dBusy) {
-      badge = <span className="model-load-badge is-loading" role="status"><span className="load-dot is-loading" aria-hidden="true" />Loading…</span>;
+      badge = <span className="model-load-badge is-loading" role="status"><span className="load-dot is-loading" aria-hidden="true" />กำลังโหลด…</span>;
     } else if (isFocused && modelStatus === "ready") {
-      badge = <span className="model-load-badge is-ready" role="status"><span className="load-dot is-ready" aria-hidden="true" />Loaded</span>;
+      badge = <span className="model-load-badge is-ready" role="status"><span className="load-dot is-ready" aria-hidden="true" />พร้อมแล้ว</span>;
     } else if (isFocused && modelStatus === "error") {
-      badge = <span className="model-load-badge is-error" role="status"><span className="load-dot is-error" aria-hidden="true" />Not loaded</span>;
+      badge = <span className="model-load-badge is-error" role="status"><span className="load-dot is-error" aria-hidden="true" />ยังโหลดไม่ติด</span>;
     }
     return {
       id: model.id,
       image: modelPreviews[model.id],
-      alt: `${model.name} profile`,
+      alt: `รูปโปรไฟล์ของ ${model.name}`,
       badge,
-      content: <span className="grid gap-1"><strong className="text-base">{model.name}</strong><small className="text-white/85">{cloudLibrary?.models.some((entry) => entry.id === pack.id) ? "Cloud model" : "This device"}</small></span>,
+      content: <span className="grid gap-1"><strong className="text-base">{model.name}</strong><small className="text-white/85">{cloudLibrary?.models.some((entry) => entry.id === pack.id) ? "อยู่บน Cloud" : "อยู่ในเครื่องนี้"}</small></span>,
     };
   }), [cloudLibrary, live2dBusy, modelCarouselEntries, modelPreviews, modelStatus, pendingModelId, activeModelId]);
   const [preferencesReady, setPreferencesReady] = useState(false);
@@ -569,7 +569,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
             paused = true;
             setModelPaused(true);
             setModelStatus("error");
-            setModelNotice("Model loading was interrupted twice. Use Reload model to retry with Auto quality.");
+            setModelNotice("โมเดลโหลดสะดุดไปสองรอบอะ กด 'โหลดโมเดลใหม่อีกที' เพื่อใช้โหมดออโต้ดูนะ");
           }
         } catch { /* Storage restrictions do not block chat. */ }
         return paused;
@@ -587,7 +587,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       if (cancelled) return;
       setCloudLibrary(cloud);
       if (!cloud) {
-        setModelNotice((notice) => notice ?? "Cloud sync is unavailable. Models saved on this device still work.");
+        setModelNotice((notice) => notice ?? "ตอนนี้ต่อ Cloud ไม่ติดแฮะ แต่โมเดลที่เซฟไว้ในเครื่องนี้ยังเล่นได้ปกติเลย!");
         return;
       }
       setModelPackages((current) => {
@@ -616,7 +616,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       // Background preload is deferred until the selected model reaches
       // first frame (modelStatus === "ready"). See the priority effect below.
     })().catch(() => {
-      if (!cancelled) setModelNotice("Model storage is unavailable. Please try again.");
+      if (!cancelled) setModelNotice("เข้าคลังโมเดลในเครื่องไม่ได้แฮะ ลองรีเฟรชอีกทีนะ");
     }).finally(() => { if (!cancelled) { setModelSelectionResolved(true); setModelsReady(true); } });
     return () => { cancelled = true; cancelCloudStart?.(); modelPreloadAbortRef.current?.abort(); controller.abort(); };
   }, [accountId]);
@@ -810,7 +810,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     startupModelResolvedRef.current = true;
     setStartupModelPending(false);
     setModelImporting(true);
-    setModelImportProgress({ label: "Preparing model import…", percent: null });
+    setModelImportProgress({ label: "กำลังเตรียมไฟล์โมเดลแป๊บ…", percent: null });
     const wasPaused = modelPaused;
     setModelPaused(true);
     setModelNotice(null);
@@ -819,30 +819,30 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       // expanding another package. Keep rendering paused through cloud sync.
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const importingZip = files.length === 1 && /\.zip$/i.test(files[0].name);
-      setModelImportProgress(importingZip ? { label: "Extracting model files…", percent: 0 } : { label: "Inspecting model files…", percent: null });
+      setModelImportProgress(importingZip ? { label: "กำลังแตกไฟล์โมเดล…", percent: 0 } : { label: "กำลังเช็กไฟล์โมเดลให้…", percent: null });
       let reportedExtraction = -1;
       const pack = await importModelFiles(files, importingZip ? (ratio) => {
         const percent = Math.min(99, Math.round(Math.max(0, Math.min(1, ratio)) * 100));
         if (percent <= reportedExtraction) return;
         reportedExtraction = percent;
-        setModelImportProgress({ label: "Extracting model files…", percent });
+        setModelImportProgress({ label: "กำลังแตกไฟล์โมเดล…", percent });
       } : undefined);
-      setModelImportProgress({ label: "Caching model on this device…", percent: null });
+      setModelImportProgress({ label: "กำลังเซฟโมเดลลงเครื่องนี้…", percent: null });
       await saveModelPackage(pack);
       setModelPackages((current) => [...current.map(modelCatalogEntry), pack]);
       setActiveModelId(pack.models[0].id);
       void navigator.storage?.persist?.().catch(() => {});
       if (isCloudLibraryAllowed(cloudLibrary) && accountRef.current?.capabilities.canUseCloudModels !== false) {
-        setModelImportProgress({ label: "Preparing private cloud copy…", percent: null });
+        setModelImportProgress({ label: "กำลังเตรียมอัปขึ้น Cloud ส่วนตัว…", percent: null });
         await syncModelToCloud(pack, importingZip ? files[0] : undefined);
       }
     } catch (error) {
       if (error instanceof CloudModelError && error.code === "STORAGE_QUOTA_EXCEEDED") {
-        setModelNotice("บันทึกไว้บนเครื่องแล้ว แต่พื้นที่ Cloud R2 ส่วนตัวเต็ม (512 MB) — ลบไฟล์เก่าใน Cloud ก่อนอัปโหลดเพิ่มนะคะ");
+        setModelNotice("เซฟลงเครื่องนี้ให้แล้วนะ แต่พื้นที่ Cloud R2 ส่วนตัวเต็ม 512 MB แล้วอะ ลบอันเก่าออกก่อนค่อยอัปเพิ่มน้า");
       } else if (error instanceof CloudModelError && error.code === "TIER_REQUIRED") {
         setModelNotice(CLOUD_TIER_REQUIRED_MESSAGE);
       } else {
-        setModelNotice(error instanceof Error ? error.message : "Could not import this model.");
+        setModelNotice(error instanceof Error ? error.message : "เอาโมเดลนี้เข้าไม่สำเร็จแฮะ ลองเช็กไฟล์อีกทีนะ");
       }
     } finally {
       setModelImporting(false);
@@ -870,19 +870,19 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     } : current);
     await removeModelPackage(pack.id).catch(() => {});
     void refreshAccount();
-    setModelNotice("Model saved privately to cloud.");
+    setModelNotice("เซฟโมเดลขึ้น Cloud ส่วนตัวให้เรียบร้อย จึ้ง!");
   }
 
   async function saveActiveModelToCloud() {
     if (!activePackage || modelImporting || !isCloudLibraryAllowed(cloudLibrary) || accountRef.current?.capabilities.canUseCloudModels === false) return;
     setModelImporting(true);
-    setModelImportProgress({ label: "Preparing private cloud copy…", percent: null });
+    setModelImportProgress({ label: "กำลังเตรียมอัปขึ้น Cloud ส่วนตัว…", percent: null });
     try { await syncModelToCloud(activePackage); }
     catch (error) {
       if (error instanceof CloudModelError && error.code === "TIER_REQUIRED") {
         setModelNotice(CLOUD_TIER_REQUIRED_MESSAGE);
       } else {
-        setModelNotice(error instanceof Error ? error.message : "Could not save model to cloud.");
+        setModelNotice(error instanceof Error ? error.message : "อัปโมเดลขึ้น Cloud ไม่ติดแฮะ ลองใหม่อีกรอบนะ");
       }
     }
     finally { setModelImporting(false); setModelImportProgress(null); }
@@ -903,12 +903,12 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     // Cancel pending render preparation immediately, while retaining its predecessor.
     modelLoadIdRef.current++;
     modelRenderAbortRef.current?.abort();
-    setModelNotice("Loading model files…");
+    setModelNotice("กำลังโหลดไฟล์โมเดล…");
     try {
       const downloaded = await availableModelPackage(pack, cloudLibrary ?? modelCloudRequestRef.current, abort.signal);
       abort.signal.throwIfAborted();
-      if (!downloaded) throw new Error("Model files are unavailable.");
-      if (!downloaded.models.some((model) => model.id === id)) throw new Error("This model is no longer in the package. Select another model.");
+      if (!downloaded) throw new Error("หาไฟล์โมเดลไม่เจอแฮะ");
+      if (!downloaded.models.some((model) => model.id === id)) throw new Error("โมเดลนี้ไม่มีอยู่ในชุดไฟล์แล้วอะ ลองจิ้มตัวอื่นดูนะ");
       cacheModelPreviews(downloaded);
       setModelPackages((current) => current.map((entry) => entry.id === pack.id ? downloaded : modelCatalogEntry(entry)));
       setActiveModelId(id);
@@ -923,7 +923,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       setModelSwitchPending(false);
       cancelTiming(modelSelectionTimingRef.current);
       setModelStatus(modelRef.current ? "ready" : "error");
-      setModelNotice(error instanceof Error ? error.message : "Could not load model.");
+      setModelNotice(error instanceof Error ? error.message : "โหลดโมเดลไม่ขึ้นแฮะ");
     } finally { if (modelSelectionAbortRef.current === abort) modelSelectionAbortRef.current = null; }
   }
 
@@ -946,7 +946,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       setModelPackages(remaining);
       setActiveModelId(remaining[0]?.models[0]?.id ?? null);
       setModelNotice(null);
-    } catch { setModelNotice("Could not remove the saved model. Please try again."); }
+    } catch { setModelNotice("ลบโมเดลยังไม่สำเร็จ ลองกดอีกทีนะ"); }
     finally { setModelImporting(false); }
   }
 
@@ -954,7 +954,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     if (!activeModel || !activePackage || !activeModel.expressions.includes(expression)) return;
     const current = activeExpressionModelRef.current === activeModel.id ? activeExpressionsRef.current : [];
     const next = current.includes(expression) ? current.filter((item) => item !== expression) : [...current, expression];
-    if (next.length > 128) { setModelNotice("Choose up to 128 expressions for one model."); return; }
+    if (next.length > 128) { setModelNotice("เลือกผสมสีหน้าได้สูงสุด 128 อันต่อโมเดลนะเธอ"); return; }
     saveExpressionSelection(next);
   }
 
@@ -990,7 +990,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       };
       cloudLibraryRef.current = updated;
       setCloudLibrary(updated);
-    }).catch(() => { if (expressionSaveVersionsRef.current.get(key) === saveVersion) setModelNotice("Saved on this device; cloud sync is unavailable."); });
+    }).catch(() => { if (expressionSaveVersionsRef.current.get(key) === saveVersion) setModelNotice("เซฟสีหน้าไว้ในเครื่องนี้ให้ละ แต่ยังซิงก์ขึ้นคลาวด์ไม่ติดนะ"); });
   }
 
   function clearSavedExpressions() {
@@ -1019,7 +1019,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     } catch {
       if (actionId === motionActionRef.current && loadId === modelLoadIdRef.current) {
         setActiveMotion(null);
-        setModelNotice("This motion could not be played.");
+        setModelNotice("ท่าทางนี้เล่นไม่ได้แฮะ");
       }
     }
   }
@@ -1150,7 +1150,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         // Catalog entries deliberately have no assets. Every path into this
         // effect (refresh, deletion, retry or selection) must hydrate first —
         // hydration already ran alongside the module download above.
-        if (!renderPackage) throw new Error("Model files are unavailable on this device. Download the cloud copy or import the original model again.");
+        if (!renderPackage) throw new Error("หาไฟล์โมเดลในเครื่องไม่เจอแฮะ ลองโหลดจาก Cloud หรือเอาไฟล์โมเดลเข้ามาใหม่อีกรอบนะ");
         cacheModelPreviews(renderPackage);
         if (renderPackage !== activePackage) {
           // Replace stale Blob handles in React too; otherwise every quality
@@ -1160,7 +1160,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           return;
         }
         const renderModel = renderPackage.models.find((entry) => entry.id === activeModel.id || entry.manifestPath === activeModel.manifestPath);
-        if (!renderModel) throw new Error("Model selection has changed. Please select the model again.");
+        if (!renderModel) throw new Error("ตัวที่เลือกไว้เมื่อกี้เปลี่ยนไปแล้วอะ ลองจิ้มโมเดลใหม่อีกทีนะ");
         const preferenceKey = modelExpressionPreferenceKey(renderPackage.id, renderModel.manifestPath);
         const pendingExpressions = pendingExpressionPreferencesRef.current.get(preferenceKey);
         const cloudModel = cloudLibraryRef.current?.models.find((entry) => entry.id === renderPackage.id);
@@ -1199,7 +1199,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           const expressionDefinitions = resources.manifest.FileReferences.Expressions ?? [];
           const parameterSets = await loadExpressionParameterSets(expressionDefinitions, resources.resolve);
           const stackSelections = selectedExpressions.filter((name) => parameterSets.has(name));
-          if (stackSelections.length !== selectedExpressions.length) setModelNotice("Some saved expressions are unavailable in this model copy.");
+          if (stackSelections.length !== selectedExpressions.length) setModelNotice("มีบางสีหน้าที่เคยเซฟไว้หาไม่เจอในโมเดลชุดนี้แฮะ");
           const stack = createExpressionStack(parameterSets, stackSelections);
           if (stack) {
             shouldApplyStack = true;
@@ -1225,7 +1225,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
             manifest = { ...resources.manifest, FileReferences: { ...resources.manifest.FileReferences, Expressions: [...expressions, { Name: SAVED_EXPRESSION_STACK_NAME, File: SAVED_EXPRESSION_STACK_FILE }, ...emotionDefinitions] } };
             resolveModelAsset = (reference) => compositeExpressionUrls.get(reference) ?? resources.resolve(reference);
           } else {
-            setModelNotice("Saved expressions could not be combined with this model.");
+            setModelNotice("เอาสีหน้าที่เซฟไว้มาผสมกันไม่สำเร็จอะ");
             aiExpressionStacksRef.current.delete(renderModel.id);
           }
         } else {
@@ -1241,13 +1241,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           releaseResources();
           return;
         }
-        if (shouldApplyStack && !await model.expression(SAVED_EXPRESSION_STACK_NAME)) setModelNotice("Saved expressions could not be applied to this model.");
+        if (shouldApplyStack && !await model.expression(SAVED_EXPRESSION_STACK_NAME)) setModelNotice("ใส่สีหน้าที่เซฟไว้ให้โมเดลนี้ไม่ติดแฮะ");
         if (canvasRef.current) {
           const stopWind = attachModelWind(canvasRef.current, model.internalModel as unknown as WindInternalModel);
           model.once("destroy", stopWind);
         }
         for (const texture of model.textures) {
-          if (!texture.valid) throw new Error("A model texture did not finish loading. Please reload the model.");
+          if (!texture.valid) throw new Error("รูปภาพของโมเดลโหลดไม่ครบอะ กดโหลดโมเดลใหม่อีกทีนะ");
           texture.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
           texture.baseTexture.wrapMode = PIXI.WRAP_MODES.CLAMP;
         }
@@ -1255,7 +1255,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         if (resources.texturePlan.some((plan) => plan.source.width !== plan.render.width || plan.source.height !== plan.render.height)) {
           const source = Math.max(...resources.texturePlan.flatMap((plan) => [plan.source.width, plan.source.height]));
           const render = Math.max(...resources.texturePlan.flatMap((plan) => [plan.render.width, plan.render.height]));
-          setTextureSummary(`${render.toLocaleString()}px rendering · ${source.toLocaleString()}px original`);
+          setTextureSummary(`แสดงผล ${render.toLocaleString()}px (ต้นฉบับ ${source.toLocaleString()}px)`);
         }
         const bounds = model.getLocalBounds();
         resizeModel = () => {
@@ -1296,7 +1296,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         if (previous) previous.model.visible = false;
         try { app.renderer.render(app.stage); }
         catch (error) { if (previous) previous.model.visible = true; throw error; }
-        if (app.renderer.gl.isContextLost()) throw new Error("Graphics memory is unavailable. Try Auto texture quality and reload the model.");
+        if (app.renderer.gl.isContextLost()) throw new Error("หน่วยความจำภาพของเครื่องเต็มอะ ลองเปลี่ยนความชัดเป็น 'ออโต้' แล้วโหลดโมเดลใหม่ดูนะ");
         modelRef.current = model;
         modelRestStateRef.current = restState;
         modelPresentationRef.current = { model, dispose: () => {
@@ -1369,7 +1369,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           startupModelResolvedRef.current = true;
           setStartupModelPending(false);
           setModelSwitchPending(false);
-          setModelNotice(error instanceof Error ? error.message : "Could not render this model. Check that it is compatible with Cubism 4 and includes all assets.");
+          setModelNotice(error instanceof Error ? error.message : "เปิดโมเดลนี้ไม่ขึ้นแฮะ ลองเช็กดูนะว่าเป็น Live2D Cubism 4 และไฟล์ครบหรือเปล่า");
         }
         if (!promoted) releaseResources?.();
       }
@@ -1410,7 +1410,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       pixiAppRef.current?.stop();
       setGraphicsLost(true);
       setModelStatus("error");
-      setModelNotice("Graphics interrupted. The model will reload when graphics recover.");
+      setModelNotice("ระบบภาพของเครื่องสะดุดไปแป๊บ เดี๋ยวพอหายแล้ววิเวียนโหลดโมเดลให้ใหม่นะ");
     };
     const restored = () => {
       pixiAppRef.current?.start();
@@ -2055,7 +2055,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     userInterruptedRef.current = false;
     markActivity();
     interactedRef.current = true;
-    const displayText = text || (imageToSend ? "[ส่งรูปภาพ]" : "");
+    const displayText = text || (imageToSend ? "[ส่งรูป]" : "");
     const userMessage = historyMessage("me", displayText);
     const nextMessages = [...messagesRef.current, userMessage];
     setMessages(nextMessages);
@@ -2272,10 +2272,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       }
       console.error("Vivian response unavailable", error);
       resetReaction();
-      const message = error instanceof Error && error.message.includes("RATE_LIMITED") ? "หยุดส่งข้อความ รอให้ระบบพร้อมก่อน"
-        : error instanceof Error && error.message === "SEARCH_UNAVAILABLE" ? "ระบบค้นหาขัดข้อง ตอนนี้ใช้ไม่ได้"
-        : error instanceof Error && error.message === "CHAT_NOT_CONFIGURED" ? "ระบบสนทนายังไม่พร้อม"
-        : "การเชื่อมต่อขาด รอจนกว่าจะกลับมา";
+      const message = error instanceof Error && error.message.includes("RATE_LIMITED") ? "ใจเย็นน รัวแชตเกินไปแล้ว พักแป๊บค่อยพิมพ์ใหม่นะ"
+        : error instanceof Error && error.message === "SEARCH_UNAVAILABLE" ? "ตอนนี้ค้นเน็ตให้ไม่ได้แฮะ แอปแอบงอแงนิดนึง"
+        : error instanceof Error && error.message === "CHAT_NOT_CONFIGURED" ? "ห้องแชตยังไม่พร้อมคุยเลย เดี๋ยวรอก่อนนะ"
+        : "เน็ตหลุดเฉย ช็อตฟีลสุด... รอแป๊บนะ เดี๋ยวกลับมา";
       setErrorNotice(message);
       setMessages((current) => [...current, historyMessage("vivian", message)]);
     } finally {
@@ -2297,28 +2297,28 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     const argument = match[1]?.trim() ?? "";
     const expressions = (activeModel?.expressions ?? []);
     if (argument.toLowerCase() === "list") {
-      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", `นี่ มีแค่นี้แหละ: ${expressions.join(", ")} จะเลือกอะไรก็เลือกสิ`)]);
+      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", `นี่ มีสีหน้าให้เลือกแค่นี้แหละ: ${expressions.join(", ")} อยากได้อันไหนก็จิ้มเอาเลย`)]);
       return true;
     }
     if (!argument || argument.toLowerCase() === "default" || argument.toLowerCase() === "reset") {
       clearSavedExpressions();
-      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "กลับเป็นค่าปกติแล้ว")]);
+      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "กลับมาหน้าปกติละนะ")]);
       return true;
     }
     const expression = expressions.find((item) => item.trim().toLowerCase() === argument.toLowerCase());
     if (!expression) {
-      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "ไม่มี expression ชื่อนั้น ตรวจ /expression list")]);
+      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "ไม่มีสีหน้าชื่อนั้นอะ ลองพิมพ์ /expression list เช็กดูก่อนสิ")]);
       return true;
     }
     try {
       if (!modelRef.current) throw new Error("Live2D model is not ready");
       const selected = activeExpressionModelRef.current === activeModel?.id ? activeExpressionsRef.current : [];
       if (!selected.includes(expression)) saveExpressionSelection([...selected, expression]);
-      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", `จำ ${expression.trim()} ไว้แล้ว`)]);
+      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", `โอเค จำหน้า ${expression.trim()} ไว้ให้ละนะ`)]);
     } catch (error) {
       console.warn("Manual Live2D expression unavailable", error);
       resetReaction();
-      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "เปลี่ยนไม่ได้ โมเดลยังไม่พร้อม")]);
+      setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "ยังเปลี่ยนหน้าไม่ได้อะ โมเดลยังไม่มาเลย")]);
     }
     return true;
   }
@@ -2394,7 +2394,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         if (durationMs < MIN_RECORDING_MS || !chunks.length || (voiceActivityRef.current && !voiceActivityRef.current.heardSpeech)) {
           realtime?.stop();
           clearUserKinetic();
-          setSttPreview("ยังไม่มีเสียงที่ชัดพอค่ะ");
+          setSttPreview("ยังไม่ได้ยินเสียงชัด ๆ เลย พูดใกล้ไมค์อีกนิดน้า");
           window.setTimeout(() => setSttPreview(null), 2500);
           recorderRef.current = null;
           streamRef.current = null;
@@ -2444,7 +2444,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           } else throw new Error("STT returned no speech");
         } catch (error) {
           console.warn("STT unavailable", error);
-          setSttPreview("ฟังไม่ชัด ลองพูดใหม่อีกครั้งนะคะ");
+          setSttPreview("เมื่อกี้ฟังไม่ชัดเลยอะ ลองพูดใหม่อีกทีได้ป่ะ");
           window.setTimeout(() => setSttPreview(null), 3000);
         } finally {
           cancelTiming(transcriptTiming); cancelTiming(sttTiming);
@@ -2493,7 +2493,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       micAmplitude.set(0);
       micEnabledRef.current = false;
       resetReaction();
-      setMessages((current) => [...current, historyMessage("vivian", "ยังไม่ได้รับสิทธิ์ใช้ไมโครโฟนค่ะ")]);
+      setMessages((current) => [...current, historyMessage("vivian", "ยังไม่ได้กดอนุญาตให้ใช้ไมค์เลย เปิดสิทธิ์ให้ก่อนนะ")]);
     }
   }
   function stopRecording() {
@@ -2584,7 +2584,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       cameraActiveRef.current = true;
     } catch (err) {
       console.error("Camera access failed", err);
-      setErrorNotice("ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตการเข้าถึงกล้องนะคะ");
+      setErrorNotice("เปิดกล้องไม่ได้แฮะ ลองกดอนุญาตใช้กล้องก่อนน้า");
     }
   }
 
@@ -2618,7 +2618,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setErrorNotice("กรุณาเลือกไฟล์รูปภาพนะคะ");
+      setErrorNotice("อันนี้ไม่ใช่ไฟล์รูปอะ ขอเป็นไฟล์รูปแทนน้า");
       return;
     }
     const reader = new FileReader();
@@ -2661,7 +2661,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
 
   async function saveMemory(memory: Memory) {
     const response = await authFetch("/api/memory", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: memory.id, memory: memoryDraft, category: memory.category, importance: memory.importance }) });
-    if (!response.ok) return setErrorNotice("บันทึกความจำไม่สำเร็จค่ะ");
+    if (!response.ok) return setErrorNotice("เซฟความจำตรงนี้ไม่ติดแฮะ ลองอีกทีนะ");
     const data = await response.json() as { memory?: Memory };
     if (data.memory) setMemories((current) => current.map((item) => item.id === memory.id ? data.memory! : item));
     setEditingMemoryId(null);
@@ -2709,9 +2709,9 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       setErrorNotice(null);
       markActivity();
       interactedRef.current = false;
-      setResetNotice("รีเซ็ตแล้ว เริ่มคุยกันใหม่ได้เลยนะ");
+      setResetNotice("รีเซ็ตให้เรียบร้อย! มาเริ่มนับหนึ่งคุยกันใหม่เลย");
     } catch {
-      setResetNotice("รีเซ็ตไม่สำเร็จทั้งหมด ลองอีกครั้งนะ แชตบนอุปกรณ์นี้ยังไม่ได้ล้าง");
+      setResetNotice("ยังล้างออกไม่หมดแฮะ แชตในเครื่องนี้ยังอยู่ ลองกดใหม่อีกทีน้า");
     } finally {
       resettingRef.current = false;
       setResetting(false);
@@ -2812,13 +2812,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     if (previewConversationId === id) setPreviewConversationId(null);
   }
   const navigation: Array<{ key: Panel; label: string; icon: IconName }> = [
-    { key: "conversations", label: "Conversations", icon: "message" },
-    { key: "memories", label: "Memories", icon: "memory" },
-    { key: "character", label: "Character", icon: "wardrobe" },
-    { key: "scenes", label: "Scenes", icon: "scene" },
-    { key: "voice", label: "Voice", icon: "sound" },
-    { key: "status", label: "Status", icon: "status" },
-    { key: "settings", label: "Settings", icon: "config" },
+    { key: "conversations", label: "ประวัติแชต", icon: "message" },
+    { key: "memories", label: "ความจำ", icon: "memory" },
+    { key: "character", label: "ตัวละคร", icon: "wardrobe" },
+    { key: "scenes", label: "ฉากหลัง", icon: "scene" },
+    { key: "voice", label: "เสียงพูด", icon: "sound" },
+    { key: "status", label: "สิทธิ์ & พื้นที่", icon: "status" },
+    { key: "settings", label: "ตั้งค่า", icon: "config" },
   ];
   // One shared state vocabulary for the orb: it follows radio/TTS/mic reality.
   const orbState: AIState =
@@ -2928,14 +2928,14 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       active={live2dLoading}
       variant="words"
       background="bg-background/90 backdrop-blur-sm"
-      words={["รอฉันแป๊บนึงนะคะ...", "วิเวียนกำลังเตรียมตัวให้สวยอยู่", "อย่าไปไหนนะ... ฉันจะมา", "แค่เธอคนเดียว รอได้ใช่ไหมคะ", "เกือบพร้อมแล้วค่ะ"]}
+      words={["รอแป๊บนึงน้า...", "กำลังแต่งตัวให้จึ้งอยู่", "อย่าเพิ่งหนีไปไหนนะ... เดี๋ยวมา", "แค่เธอคนเดียวยอมรอหน่อยได้ป่ะ", "ใกล้เสร็จละ อะแฮ่ม!"]}
       onComplete={() => {}}
     />
     <section className={`companion-stage ${MODEL_CONFIG[selectedModel].background} ${!sending && !recording ? "is-idle" : ""}`} aria-label="Vivian companion">
       <SceneBackground source={sceneLibrary.scenes.find((scene) => scene.id === activeCustomSceneId)?.imageUrl ?? BACKGROUNDS[selectedPreset]} preview={sceneLibrary.scenes.find((scene) => scene.id === activeCustomSceneId)?.thumbnailUrl} timing={sceneLibrary.selectionTiming} />
       <canvas className="live2d-canvas" ref={canvasRef} />
       <header className="companion-brand">
-        <button className="brand-menu" type="button" onClick={openMenuHub} aria-label="เปิดเมนู Vivian (แชต ความจำ ท่าทาง ฉาก เสียง สถานะ)">
+        <button className="brand-menu" type="button" onClick={openMenuHub} aria-label="เปิดเมนู Vivian (แชต ความจำ ตัวละคร ฉาก เสียง สิทธิ์)">
           <span className="brand-mark" aria-hidden="true"/><span>Vivian</span>
         </button>
       </header>
@@ -2943,7 +2943,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         <div className="camera-pip-header">
           <div className="live-badge">
             <span className="live-dot" aria-hidden="true" />
-            <span>{cameraFacing === "environment" ? "REAR CAM" : "LIVE VISION"}</span>
+            <span>{cameraFacing === "environment" ? "กล้องหลัง" : "กล้องสด"}</span>
           </div>
           <div style={{ display: "flex", gap: 4 }}>
             <button type="button" onClick={switchCamera} aria-label="สลับกล้อง" title="สลับกล้องหน้า/หลัง">
@@ -2967,13 +2967,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         />
       </div>
       <div className="speech-stack">
-        <KineticText store={userKinetic} variant="user" label="You said" />
-        {sttPreview && <div className="speech-preview"><small>You said</small>{sttPreview}</div>}
+        <KineticText store={userKinetic} variant="user" label="เธอพูดว่า" />
+        {sttPreview && <div className="speech-preview"><small>เธอพูดว่า</small>{sttPreview}</div>}
         <output className={`vivian-speech ${sending && !speaking && !showKinetic ? "is-thinking" : ""}`} aria-live="polite">
           {showKinetic
             ? <><KineticText store={vivianKinetic} variant="vivian" /><span className="sr-only">{lastVivianMessage}</span></>
             : sending && !speaking
-            ? <span className="speech-transition" key="thinking"><span>Vivian กำลังคิด</span><span className="thinking-dots" aria-hidden="true"><i/><i/><i/></span></span>
+            ? <span className="speech-transition" key="thinking"><span>Vivian กำลังนึกคำอยู่</span><span className="thinking-dots" aria-hidden="true"><i/><i/><i/></span></span>
             : !sending
               ? <span className="speech-transition" key={lastVivianMessage}>{lastVivianMessage}</span>
               : null}
@@ -2981,17 +2981,17 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       </div>
       {errorNotice && <button className="error-notice" type="button" onClick={() => setErrorNotice(null)}>{errorNotice} ×</button>}
       {attachedImage && (
-        <div className="attachment-preview" aria-label="รูปภาพที่แนบ">
-          <img src={attachedImage} alt="Attachment preview" />
-          <span>แนบรูปภาพแล้ว</span>
-          <button type="button" onClick={() => setAttachedImage(null)} aria-label="ลบรูปภาพ">×</button>
+        <div className="attachment-preview" aria-label="รูปที่แนบมา">
+          <img src={attachedImage} alt="ตัวอย่างรูปที่แนบ" />
+          <span>แนบรูปเรียบร้อย</span>
+          <button type="button" onClick={() => setAttachedImage(null)} aria-label="ลบรูป">×</button>
         </div>
       )}
       {textOpen && <button className="composer-scrim" type="button" tabIndex={-1} aria-label="ปิดช่องพิมพ์" onClick={closeComposer} />}
       <div className="orb-dock">
         <form className={`composer-pill ${textOpen ? "is-open" : ""}`} onSubmit={(event) => { event.preventDefault(); void sendMessage(); }} inert={!textOpen}>
-          <button className="circle-control" type="button" onClick={() => fileInputRef.current?.click()} aria-label="แนบรูปภาพ"><Icon name="clip" size={18}/></button>
-          <input value={message} onChange={(event) => setMessage(event.target.value)} autoFocus={textOpen} placeholder={recording ? "กำลังฟัง... กดไมค์เพื่อ Mute" : cameraActive ? "กล้อง Live กำลังทำงาน... พิมพ์คุยได้" : "Talk to Vivian"} aria-label="ข้อความถึง Vivian" />
+          <button className="circle-control" type="button" onClick={() => fileInputRef.current?.click()} aria-label="แนบรูป"><Icon name="clip" size={18}/></button>
+          <input value={message} onChange={(event) => setMessage(event.target.value)} autoFocus={textOpen} placeholder={recording ? "กำลังฟังอยู่... แตะไมค์เพื่อปิด" : cameraActive ? "เปิดกล้องอยู่... พิมพ์คุยได้เลย" : "พิมพ์คุยกับ Vivian..."} aria-label="ข้อความถึง Vivian" />
           <button className="send-text" type="submit" disabled={sending || !history.ready || (!message.trim() && !attachedImage)} aria-label="ส่งข้อความ"><Icon name="send" size={18}/></button>
         </form>
         <div className="orb-row">
@@ -3031,7 +3031,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
             onPointerUp={onOrbPointerEnd}
             onPointerCancel={onOrbPointerEnd}
             onContextMenu={(event) => event.preventDefault()}
-            aria-label="กดค้างเพื่อพูดกับ Vivian แตะสองครั้งเพื่อเปิดทางลัด (mic cam chat setting)"
+            aria-label="กดค้างเพื่อคุยกับ Vivian แตะสองครั้งเพื่อเปิดทางลัด (ไมค์ กล้อง พิมพ์ ตั้งค่า)"
             aria-expanded={radialOpen}
           >
             <SiriOrb size="62px" state={orbState} amplitude={recording ? micAmplitude : 0} />
@@ -3041,10 +3041,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       </div>
     </section>
     <div className={`floating-overlay ${sidebarOpen ? "is-visible" : ""}`} aria-hidden={!sidebarOpen}>
-      <button className="floating-scrim" type="button" tabIndex={sidebarOpen ? 0 : -1} onClick={closeMenu} aria-label="Close sidebar" />
+      <button className="floating-scrim" type="button" tabIndex={sidebarOpen ? 0 : -1} onClick={closeMenu} aria-label="ปิดเมนู" />
       <div className="floating-workspace menu-window">
-        <section className="floating-panel" role="dialog" aria-modal="true" aria-label={panel ? navigation.find((item) => item.key === panel)?.label : "Vivian menu"}>
-          <div className="floating-panel-head">{panel && <button className="settings-back" type="button" onClick={backToNavigation} aria-label="Back to menu"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>}<div><small>{panel ? `VIVIAN / ${panel.toUpperCase()}` : "VIVIAN / MENU"}</small><h2>{panel ? navigation.find((item) => item.key === panel)?.label : "Menu"}</h2></div><button type="button" onClick={closeNavigation} aria-label="Close menu"><Icon name="close" size={18}/></button></div>
+        <section className="floating-panel" role="dialog" aria-modal="true" aria-label={panel ? navigation.find((item) => item.key === panel)?.label : "เมนู Vivian"}>
+          <div className="floating-panel-head">{panel && <button className="settings-back" type="button" onClick={backToNavigation} aria-label="กลับไปหน้าเมนู"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>}<div><small>{panel ? `VIVIAN / ${panel.toUpperCase()}` : "VIVIAN / MENU"}</small><h2>{panel ? navigation.find((item) => item.key === panel)?.label : "เมนู"}</h2></div><button type="button" onClick={closeNavigation} aria-label="ปิดเมนู"><Icon name="close" size={18}/></button></div>
           {modelImporting && panel === "character" && <div className={`floating-panel-loadbar${typeof displayedImportPercent === "number" ? " is-determinate" : " is-indeterminate"}`} aria-hidden="true"><span style={typeof displayedImportPercent === "number" ? { width: `${displayedImportPercent}%` } : undefined} /></div>}
           <div className="floating-panel-body">
             {!panel && <>
@@ -3056,7 +3056,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                 onOpenRequest={() => setRequestModalOpen(true)}
                 onOpenProfile={() => { closeMenu(); setOnboardingOpen(true); }}
               />
-              <button type="button" className="floating-new-chat" onClick={newConversation}><Icon name="plus" size={17}/> New Chat</button>
+              <button type="button" className="floating-new-chat" onClick={newConversation}><Icon name="plus" size={17}/> เริ่มแชตใหม่</button>
               <div className="floating-menu-list">{navigation.map((item) => <button key={item.key} type="button" className="floating-nav-item" onClick={() => openPanel(item.key)}><Icon name={item.icon} size={18}/><span>{item.label}</span><span className="nav-chevron"><Icon name="chevron" size={16}/></span></button>)}</div>
             </>}
             {panel === "conversations" && (() => {
@@ -3064,35 +3064,35 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
               const avatar = modelPreviews[activeModelId ?? ""] ?? Object.values(modelPreviews)[0];
               const timeLabel = (updatedAt: number) => {
                 const days = Math.floor((Date.now() - updatedAt) / 86_400_000);
-                return days <= 0 ? "Today" : days === 1 ? "Yesterday" : new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(updatedAt);
+                return days <= 0 ? "วันนี้" : days === 1 ? "เมื่อวาน" : new Intl.DateTimeFormat("th-TH", { month: "short", day: "numeric" }).format(updatedAt);
               };
               const filtered = conversations.filter((item) => item.title.toLowerCase().includes(conversationSearch.toLowerCase()) || item.messages.some((entry) => entry.text.toLowerCase().includes(conversationSearch.toLowerCase()))).sort((a, b) => b.updatedAt - a.updatedAt);
               if (preview) {
                 return <>
-                  <button type="button" className="preview-back" onClick={() => setPreviewConversationId(null)} aria-label="Back to all conversations"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg> All conversations</button>
+                  <button type="button" className="preview-back" onClick={() => setPreviewConversationId(null)} aria-label="กลับไปดูแชตทั้งหมด"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg> แชตทั้งหมด</button>
                   <div className="conversation-preview">
                     <div className="preview-head">
                       {avatar ? <img src={avatar} alt="" className="preview-avatar" /> : <span className="conversation-avatar">V</span>}
-                      <div className="preview-title"><strong>{preview.title}</strong><small>Vivian · always online</small></div>
+                      <div className="preview-title"><strong>{preview.title}</strong><small>Vivian · ออนไลน์ตลอด</small></div>
                     </div>
                     <div className="preview-messages chat-history">
-                      {preview.messages.slice(-30).map((message, index) => <div className={`chat-message ${message.from}`} key={message.id ?? index}><small>{message.from === "me" ? "You" : "Vivian"}</small><p>{speechText(message.text)}</p></div>)}
+                      {preview.messages.slice(-30).map((message, index) => <div className={`chat-message ${message.from}`} key={message.id ?? index}><small>{message.from === "me" ? "เธอ" : "Vivian"}</small><p>{speechText(message.text)}</p></div>)}
                     </div>
                     <div className="preview-actions">
-                      <button type="button" className="ghost-btn primary" onClick={() => selectConversation(preview)}>Open chat</button>
-                      <button type="button" className="ghost-btn danger" onClick={() => void deleteConversation(preview.id)}>Delete</button>
+                      <button type="button" className="ghost-btn primary" onClick={() => selectConversation(preview)}>เปิดแชตนี้</button>
+                      <button type="button" className="ghost-btn danger" onClick={() => void deleteConversation(preview.id)}>ลบแชต</button>
                     </div>
                   </div>
                 </>;
               }
               return <>
-                <label className="floating-search"><Icon name="search" size={17}/><input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Search conversations" /></label>
+                <label className="floating-search"><Icon name="search" size={17}/><input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="ค้นหาแชตเก่า..." /></label>
                 {filtered.length ? <div className="conversation-list">{filtered.map((conversation) => {
                   const last = conversation.messages.at(-1);
-                  const snippet = last ? speechText(last.text) : "Start chatting with Vivian";
+                  const snippet = last ? speechText(last.text) : "ทักมาเม้าท์กับ Vivian ได้นะ";
                   const isActive = conversation.id === activeConversationId;
                   return <div key={conversation.id} className={`conversation-row${isActive ? " is-selected" : ""}`} role="group" aria-label={conversation.title}>
-                    <button type="button" className="conversation-open" aria-label={`Preview ${conversation.title}`} onClick={() => setPreviewConversationId(conversation.id)}>
+                    <button type="button" className="conversation-open" aria-label={`ดูแชต ${conversation.title}`} onClick={() => setPreviewConversationId(conversation.id)}>
                       {avatar ? <img src={avatar} alt="" className="conversation-avatar" /> : <span className="conversation-avatar">V</span>}
                       <span className="conversation-meta"><strong>{conversation.title}</strong><small>{snippet}</small></span>
                       <time>{timeLabel(conversation.updatedAt)}</time>
@@ -3102,16 +3102,16 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                       <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
                     </button>
                   </div>;
-                })}</div> : <p className="floating-empty">{conversations.length ? "No conversations match your search." : "No conversations yet — start chatting with Vivian."}</p>}
-                <p role="status" className="history-status">{!history.ready ? "Loading chat history…" : history.notice ?? "Chat history · Supabase"}</p>
+                })}</div> : <p className="floating-empty">{conversations.length ? "หาแชตที่ตรงกับคำนี้ไม่เจอแฮะ" : "ยังไม่มีแชตเก่าเลย — มาเริ่มคุยกับ Vivian กัน"}</p>}
+                <p role="status" className="history-status">{!history.ready ? "กำลังโหลดแชตเก่า…" : history.notice ?? "ซิงก์แชตไว้บนคลาวด์แล้ว"}</p>
               </>;
             })()}
             {panel === "memories" && <>
-              <div className="bond-panel"><p><strong>Daily check-in</strong> {streak} days together</p><p><strong>Mood</strong>{moodLabel(companion.mood)}</p>{[["Affinity", companion.affinity], ["Trust", companion.trust], ["Familiarity", companion.familiarity]].map(([label, value]) => <div key={String(label)}><span>{label}</span><i><b style={{ width: `${value}%` }}/></i><em>{value}</em></div>)}</div>
-              <div className="memory-list">{memories.length ? memories.map((memory) => <article key={memory.id}><Icon name="memory" size={18}/>{editingMemoryId === memory.id ? <div className="memory-edit"><textarea value={memoryDraft} maxLength={500} onChange={(event) => setMemoryDraft(event.target.value)}/><div><button type="button" onClick={() => void saveMemory(memory)}>Save</button><button type="button" onClick={() => setEditingMemoryId(null)}>Cancel</button></div></div> : <><p><strong>{memory.category}</strong>{memory.memory}</p><button type="button" className="memory-edit-button" onClick={() => { setEditingMemoryId(memory.id); setMemoryDraft(memory.memory); }}>Edit</button></>}</article>) : <p className="floating-empty">Nothing has caught Vivian&apos;s attention yet.</p>}</div>
+              <div className="bond-panel"><p><strong>มาหาทุกวัน</strong> {streak} วันติดละนะ</p><p><strong>ฟีลตอนนี้</strong>{moodLabel(companion.mood)}</p>{[["ความเอ็นดู", companion.affinity], ["ความไว้ใจ", companion.trust], ["ความสนิท", companion.familiarity]].map(([label, value]) => <div key={String(label)}><span>{label}</span><i><b style={{ width: `${value}%` }}/></i><em>{value}</em></div>)}</div>
+              <div className="memory-list">{memories.length ? memories.map((memory) => <article key={memory.id}><Icon name="memory" size={18}/>{editingMemoryId === memory.id ? <div className="memory-edit"><textarea value={memoryDraft} maxLength={500} onChange={(event) => setMemoryDraft(event.target.value)}/><div><button type="button" onClick={() => void saveMemory(memory)}>เซฟ</button><button type="button" onClick={() => setEditingMemoryId(null)}>ยกเลิก</button></div></div> : <><p><strong>{memory.category}</strong>{memory.memory}</p><button type="button" className="memory-edit-button" onClick={() => { setEditingMemoryId(memory.id); setMemoryDraft(memory.memory); }}>แก้</button></>}</article>) : <p className="floating-empty">ตอนนี้ยังไม่มีเรื่องที่ Vivian จดไว้เลย คุยกันไปเรื่อย ๆ เดี๋ยวก็จำได้เอง</p>}</div>
             </>}
             {panel === "character" && <>
-              <div className="floating-tabs">{(["outfit", "expression", "pose"] as const).map((tab) => <button key={tab} type="button" className={characterTab === tab ? "is-selected" : ""} onClick={() => setCharacterTab(tab)}>{tab === "outfit" ? "Models" : tab}</button>)}</div>
+              <div className="floating-tabs">{(["outfit", "expression", "pose"] as const).map((tab) => <button key={tab} type="button" className={characterTab === tab ? "is-selected" : ""} onClick={() => setCharacterTab(tab)}>{tab === "outfit" ? "โมเดล" : tab === "expression" ? "สีหน้า" : "ท่าทาง"}</button>)}</div>
               {characterTab === "outfit" && <>
                 {modelCarouselItems.length > 0 ? <CoverflowCarousel
                   ariaLabel="Live2D models"
@@ -3128,13 +3128,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                   }}
                   rotation={32}
                   spacing={155}
-                /> : <div className="character-preview character-preview-empty"><strong>Your character awaits</strong><small>Import a Live2D model to begin.</small></div>}
-                {activeModel && <p className="floating-note model-carousel-status" role="status"><span className={`load-dot ${live2dBusy ? "is-loading" : modelStatus === "ready" ? "is-ready" : "is-error"}`} aria-hidden="true" />{live2dBusy ? "Loading Live2D model…" : modelStatus === "ready" ? `Live2D Loaded — ${activeModel.expressions.length} expressions · ${activeModel.motions.length} motions` : "Model not loaded"}</p>}
-                {activeModel && <label className="model-select-label">Texture quality<select value={textureQuality} onChange={(event) => { setModelNotice(null); setTextureQuality(event.target.value as "auto" | "original"); }}><option value="auto">Auto · fit this device</option><option value="original">Original textures</option></select></label>}
-                {activeModel && <button type="button" className="floating-option" disabled={modelStatus === "loading" || graphicsLost || modelImporting} onClick={() => { void (async () => { setModelNotice(null); if (modelPaused) { setTextureQuality("auto"); await chooseModel(activeModel.id); } setModelPaused(false); setModelReload((value) => value + 1); })(); }}>Reload model</button>}
-                {activeModel && <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={resetModelTransform}>Reset position & zoom</button>}
-                {activeModel && <p className="floating-note">Drag the model to move it · pinch or scroll to zoom · double-click / double-tap to reset.</p>}
-                {textureSummary && <p className="floating-note">{textureSummary}. Original files stay unchanged.</p>}
+                /> : <div className="character-preview character-preview-empty"><strong>ยังไม่มีโมเดลเลย</strong><small>อัปโหลดโมเดล Live2D มาใส่ก่อนนะ</small></div>}
+                {activeModel && <p className="floating-note model-carousel-status" role="status"><span className={`load-dot ${live2dBusy ? "is-loading" : modelStatus === "ready" ? "is-ready" : "is-error"}`} aria-hidden="true" />{live2dBusy ? "กำลังโหลด Live2D…" : modelStatus === "ready" ? `Live2D พร้อมแล้ว — ${activeModel.expressions.length} สีหน้า · ${activeModel.motions.length} ท่าทาง` : "ยังไม่ได้โหลดโมเดล"}</p>}
+                {activeModel && <label className="model-select-label">ความชัดของภาพโมเดล<select value={textureQuality} onChange={(event) => { setModelNotice(null); setTextureQuality(event.target.value as "auto" | "original"); }}><option value="auto">อัตโนมัติ · พอดีกับเครื่องนี้</option><option value="original">คมชัดสุด (ไฟล์ต้นฉบับ)</option></select></label>}
+                {activeModel && <button type="button" className="floating-option" disabled={modelStatus === "loading" || graphicsLost || modelImporting} onClick={() => { void (async () => { setModelNotice(null); if (modelPaused) { setTextureQuality("auto"); await chooseModel(activeModel.id); } setModelPaused(false); setModelReload((value) => value + 1); })(); }}>โหลดโมเดลอีกรอบ</button>}
+                {activeModel && <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={resetModelTransform}>รีเซ็ตตำแหน่งกับขนาด</button>}
+                {activeModel && <p className="floating-note">ลากย้ายตำแหน่ง · ถ่างนิ้ว/เลื่อนลูกกลิ้งเพื่อซูม · แตะสองครั้งเพื่อรีเซ็ต</p>}
+                {textureSummary && <p className="floating-note">{textureSummary} (ไฟล์ต้นฉบับยังอยู่ครบนะ)</p>}
                 <AnimatedFileUpload
                   key={`model-upload-${modelUploadKey}`}
                   accept=".zip"
@@ -3150,7 +3150,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                   progress={modelImporting ? modelImportProgress : null}
                 />
                 <div className="model-import-actions">
-                  <button className="floating-option" type="button" disabled={modelImporting || !modelsReady} onClick={() => modelFolderRef.current?.click()}>Choose an unpacked folder instead</button>
+                  <button className="floating-option" type="button" disabled={modelImporting || !modelsReady} onClick={() => modelFolderRef.current?.click()}>หรือเลือกเป็นโฟลเดอร์โมเดลแทนก็ได้</button>
                 </div>
                 <input ref={modelFolderRef} hidden type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={(event) => { const input = event.currentTarget; const files = Array.from(input.files ?? []); void importModels(files).finally(() => { input.value = ""; }); }} />
                 {(() => {
@@ -3168,16 +3168,16 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                   return <>
                     <p className="floating-note">
                       {isFreeTier
-                        ? "นำเข้าโมเดลจาก ZIP หรือโฟลเดอร์เพื่อใช้งานบนอุปกรณ์นี้ได้ปกติ Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package."
+                        ? "ลงโมเดลจาก ZIP หรือโฟลเดอร์ไว้เล่นบนเครื่องนี้ได้ปกติเลยนะ (ขอไฟล์โมเดลครบ ๆ ขนาดไม่เกิน 512 MB)"
                         : canUseCloudModels && cloudLibrary
-                          ? "New imports are saved privately to cloud and cached on this device. Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package."
-                          : "Models are saved on this device while cloud sync is unavailable. Include the .model3.json, .moc3, textures and animation files. Up to 512 MiB per package."}
+                          ? "โมเดลที่ลงใหม่จะเซฟขึ้นคลาวด์ส่วนตัวให้เลย แล้วเก็บสำเนาไว้ในเครื่องด้วย (ขนาดไม่เกิน 512 MB)"
+                          : "ตอนนี้เซฟโมเดลไว้ในเครื่องก่อนนะ เผื่อคลาวด์ยังไม่พร้อม (ขนาดไม่เกิน 512 MB)"}
                     </p>
                     {isFreeTier && (
                       <div className="tier-gate-notice" role="note">
                         <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
                         <button type="button" className="floating-option model-import-primary" onClick={() => setRequestModalOpen(true)}>
-                          Request Selected Tier
+                          ขออัปเป็น Selected
                         </button>
                       </div>
                     )}
@@ -3188,49 +3188,49 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                     )}
                     {isSorachanTier && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.usage && (
                       <p className="floating-note">
-                        Models + scenes: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB shared. 2 GB stays unused as a safety buffer. Pending uploads count toward the budget.
+                        โมเดล + ฉากที่ใช้ไป: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB (เผื่อพื้นที่ว่างไว้ 2 GB กันเต็ม รวมไฟล์ที่กำลังอัปโหลดด้วยนะ)
                       </p>
                     )}
                     {activePackage && canUseCloudModels && isCloudLibraryAllowed(cloudLibrary) && !isCloudModelPackage && (
                       <button className="floating-option" type="button" disabled={modelImporting} onClick={() => { void saveActiveModelToCloud(); }}>
-                        Save this model to cloud
+                        เซฟโมเดลนี้ขึ้นคลาวด์
                       </button>
                     )}
                     {activePackage && (
                       <button className="floating-option model-remove" type="button" disabled={modelImporting} onClick={() => { void removeActiveModel(); }}>
-                        {isCloudModelPackage ? "Delete this package from cloud and this device" : "Remove this package from browser"}
+                        {isCloudModelPackage ? "ลบโมเดลนี้ออกจากคลาวด์และเครื่องนี้" : "ลบโมเดลนี้ออกจากเครื่อง"}
                       </button>
                     )}
                   </>;
                 })()}
               </>}
               {characterTab === "expression" && <>
-                <button type="button" className="floating-option" disabled={modelStatus !== "ready" || !activeExpressions.length} onClick={clearSavedExpressions}>Reset saved expressions</button>
-                <p className="floating-note">Choose one or more expressions. Vivian will restore the combined selection when this model loads.</p>
+                <button type="button" className="floating-option" disabled={modelStatus !== "ready" || !activeExpressions.length} onClick={clearSavedExpressions}>รีเซ็ตสีหน้าที่เซฟไว้</button>
+                <p className="floating-note">จิ้มเลือกสีหน้าไว้ได้หลายอันเลยนะ รอบหน้าพอเปิดโมเดลนี้ Vivian จะจำหน้านี้ไว้ให้</p>
                 <div className="expression-grid">{activeModel?.expressions.map((expression, index) => <button type="button" key={`${expression}:${index}`} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(expression)} onClick={() => toggleSavedExpression(expression)}>{expression.trim()}</button>)}</div>
-                {!activeModel?.expressions.length && <p className="floating-note">{activeModel ? "This model does not include expressions." : "Import a model in Models to discover its expressions."}</p>}
+                {!activeModel?.expressions.length && <p className="floating-note">{activeModel ? "โมเดลนี้ไม่มีสีหน้าให้เลือกเลยแฮะ" : "ลองลงโมเดลในแท็บ โมเดล ก่อนนะ เดี๋ยวสีหน้าจะขึ้นมาให้เลือก"}</p>}
               </>}
               {characterTab === "pose" && <>
-                <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={() => { resetReaction(); void selectMotion(null); }}>Reset to idle pose</button>
-                {!!activeModel?.poses?.length && <><p className="floating-note">Poses</p><div className="expression-grid">{activeModel.poses.map((pose) => <button type="button" key={pose} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(pose)} onClick={() => toggleSavedExpression(pose)}>{pose}</button>)}</div></>}
-                {[...new Set(activeModel?.motions.map((motion) => motion.group) ?? [])].map((group) => <div className="model-motion-group" key={group}><p className="floating-note">{group || "Default"}</p><div className="expression-grid">{activeModel?.motions.filter((motion) => motion.group === group).map((motion) => <button type="button" key={motion.index} disabled={modelStatus !== "ready"} aria-pressed={activeMotion === `${group}:${motion.index}`} onClick={() => { if (activeMotion === `${group}:${motion.index}`) { resetReaction(); void selectMotion(null); } else void selectMotion(motion); }}>{motion.name}</button>)}</div></div>)}
-                {!activeModel?.motions.length && !activeModel?.poses?.length && <p className="floating-note">{activeModel ? "This model does not include playable motions." : "Import a model in Models to discover its motions."}</p>}
+                <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={() => { resetReaction(); void selectMotion(null); }}>กลับมาท่ายืนปกติ</button>
+                {!!activeModel?.poses?.length && <><p className="floating-note">ท่าโพส</p><div className="expression-grid">{activeModel.poses.map((pose) => <button type="button" key={pose} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(pose)} onClick={() => toggleSavedExpression(pose)}>{pose}</button>)}</div></>}
+                {[...new Set(activeModel?.motions.map((motion) => motion.group) ?? [])].map((group) => <div className="model-motion-group" key={group}><p className="floating-note">{group || "ท่าทั่วไป"}</p><div className="expression-grid">{activeModel?.motions.filter((motion) => motion.group === group).map((motion) => <button type="button" key={motion.index} disabled={modelStatus !== "ready"} aria-pressed={activeMotion === `${group}:${motion.index}`} onClick={() => { if (activeMotion === `${group}:${motion.index}`) { resetReaction(); void selectMotion(null); } else void selectMotion(motion); }}>{motion.name}</button>)}</div></div>)}
+                {!activeModel?.motions.length && !activeModel?.poses?.length && <p className="floating-note">{activeModel ? "โมเดลนี้ไม่มีท่าขยับให้กดเล่นเลยอะ" : "ลองลงโมเดลในแท็บ โมเดล ก่อนนะ เดี๋ยวท่าทางจะขึ้นมาให้เลือก"}</p>}
               </>}
               {modelNotice && <p className="model-notice" role="alert">{modelNotice}</p>}
             </>}
-            {panel === "scenes" && <><SceneManager library={sceneLibrary} cloudAllowed={account ? account.capabilities.canUseCloudScenes : true} onRequestSelected={() => setRequestModalOpen(true)}/><p className="floating-note">Default backgrounds</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
+            {panel === "scenes" && <><SceneManager library={sceneLibrary} cloudAllowed={account ? account.capabilities.canUseCloudScenes : true} onRequestSelected={() => setRequestModalOpen(true)}/><p className="floating-note">ฉากเริ่มต้น</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
             {panel === "voice" && <>
               <button type="button" className="floating-option" onClick={() => { setMuted((value) => { const next = !value; if (next) stopSpeech(); return next; }); }}>
-                <Icon name="sound" size={18}/> Vivian voice <strong>{muted ? "Off" : "On"}</strong>
+                <Icon name="sound" size={18}/> เสียง Vivian <strong>{muted ? "ปิดอยู่" : "เปิดอยู่"}</strong>
               </button>
               <div className="custom-instructions voice-id-preferences">
                 <strong>11Labs Voice ID</strong>
-                <p>Voice ID ที่ใช้งานอยู่ตอนนี้ (Global): <code style={{ color: "#241329", background: "#e0d6ff", padding: "2px 6px", borderRadius: "4px" }}>{voiceId || "Default (System)"}</code></p>
+                <p>Voice ID ที่ใช้อยู่ตอนนี้ (ใช้ร่วมกันทุกเครื่อง): <code style={{ color: "#241329", background: "#e0d6ff", padding: "2px 6px", borderRadius: "4px" }}>{voiceId || "ค่าเริ่มต้น"}</code></p>
                 <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                   <input
                     type="text"
                     value={voiceIdInput}
-                    placeholder="ใส่ 11Labs Voice ID..."
+                    placeholder="วาง 11Labs Voice ID ตรงนี้..."
                     onChange={(e) => setVoiceIdInput(e.target.value)}
                     style={{ flex: 1, padding: "8px 12px", borderRadius: "10px", border: "1px solid rgba(36,19,41,0.2)", background: "rgba(255,255,255,0.65)", color: "#241329", font: "inherit", fontSize: "13px" }}
                   />
@@ -3240,19 +3240,19 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                     style={{ margin: 0, padding: "8px 14px" }}
                     onClick={() => saveVoiceId(voiceIdInput)}
                   >
-                    Save
+                    เซฟ
                   </button>
                 </div>
               </div>
-              <p role="status">{voiceNotice || "บันทึกแล้ว (Global)"}</p>
-              {voiceNotice.includes("ไม่ได้") || voiceNotice.includes("ไม่สำเร็จ") ? (
-                <button type="button" onClick={() => { if (voiceNotice.includes("โหลด")) void refreshVoicePreferences(); else saveVoiceId(voiceIdInput); }}>ลองอีกครั้ง</button>
+              <p role="status">{voiceNotice || "เซฟแล้ว (ใช้ร่วมกันทุกเครื่อง)"}</p>
+              {voiceNotice.includes("ไม่ขึ้น") || voiceNotice.includes("ไม่ติด") ? (
+                <button type="button" onClick={() => { if (voiceNotice.includes("โหลด")) void refreshVoicePreferences(); else saveVoiceId(voiceIdInput); }}>ลองใหม่อีกที</button>
               ) : null}
               <button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}>
-                <Icon name="language" size={18}/> Speech language <strong>{speechLanguage.toUpperCase()}</strong>
+                <Icon name="language" size={18}/> ภาษาที่พูด <strong>{speechLanguage.toUpperCase()}</strong>
               </button>
               <button type="button" className="floating-option" onClick={toggleRecording}>
-                <Icon name="mic" size={18}/> Microphone <strong>{recording ? "Listening" : "Start"}</strong>
+                <Icon name="mic" size={18}/> ไมโครโฟน <strong>{recording ? "กำลังฟังอยู่" : "กดเพื่อพูด"}</strong>
               </button>
             </>}
              {panel === "status" && <StorageStatusPanel account={account} onRequestSelected={() => setRequestModalOpen(true)}/>}
@@ -3267,15 +3267,15 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
                 {account?.tier === "sorachan" && account?.capabilities?.isAdmin && (
                   <SorachanAdminPanel onAccountChanged={() => { void refreshAccount(); }} />
                 )}
-                <div className="custom-instructions"><strong>Reset Vivian</strong><p>ล้างความจำ แชต Mood และความสัมพันธ์บนคลาวด์ที่ใช้ร่วมกัน รวมถึงประวัติแชต — คำแนะนำส่วนตัว (persona) จะยังอยู่ ไม่ถูกล้าง</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ข้อมูลนี้จะถูกลบถาวรจากคลาวด์ที่ใช้ร่วมกันและแชตบนอุปกรณ์นี้ โมเดล การตั้งค่าเสียง และบัญชีล็อกอินจะยังอยู่</p><button type="button" className="floating-option" disabled={sending || resetting} onClick={() => { void resetVivian(); }}>ยืนยันรีเซ็ต Vivian</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังรีเซ็ต…" : "Reset memories and companion"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>Vivian personality & custom instructions</strong><p>กำหนดบุคลิก วิธีพูด น้ำเสียง นิสัย ความสนใจ และวิธีปฏิบัติต่อคุณได้จากช่องเดียว คำแนะนำนี้มี Priority เหนือบุคลิกเริ่มต้นของ Vivian และถูกใช้กับทุกแชต (ข้อกำหนดด้านความปลอดภัย ความจริง และขีดจำกัดของระบบยังคงเดิม)</p><textarea aria-label="Vivian personality and custom instructions" value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="ตัวอย่าง: ให้ Vivian ร่าเริงขึ้น พูดเป็นกันเอง ชอบแซวแบบน่ารัก ตอบภาษาไทยธรรมชาติ และไม่ต้องลงท้ายทุกประโยคด้วยคำถาม..."/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "Saving…" : "Save"}</button><button type="button" className="floating-option" disabled={savingCustomInstructions || !savedCustomInstructions} onClick={() => { void clearCustomInstructions(); }}>ล้างคำแนะนำ</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้บันทึก" : "ซิงก์ทุกเครื่องแล้ว")}</span><span role="status">{customInstructions.length} / 2000</span></div>{customInstructionVersions.length > 1 && <div className="custom-instruction-versions"><span>เวอร์ชันก่อนหน้า</span>{customInstructionVersions.slice(1, 4).map((v) => <button key={v.id} type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => restoreCustomInstructions(v.instructions)}>Restore previous version {new Date(v.created_at).toLocaleString()}</button>)}</div>}</div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> Language <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> About Vivian</button>
+                <div className="custom-instructions"><strong>เริ่มใหม่กับ Vivian (รีเซ็ต)</strong><p>ลบความจำ ฟีล ความสนิท และประวัติแชตทั้งหมดออกให้โล่งเลย — แต่สไตล์คุยส่วนตัวที่เธอเซ็ตไว้ยังอยู่ครบนะ</p>{resetConfirming ? <div role="alertdialog" aria-label="ยืนยันรีเซ็ต Vivian"><p>ถ้ากดยืนยัน ความจำกับแชตทั้งหมดจะหายถาวรเลยนะ แต่น้องโมเดล การตั้งค่าเสียง แล้วก็บัญชียังอยู่ครบ</p><button type="button" className="floating-option" disabled={sending || resetting} onClick={() => { void resetVivian(); }}>จัดเลย ล้างใหม่</button><button type="button" className="floating-option" onClick={() => setResetConfirming(false)}>ยกเลิก</button></div> : <button type="button" className="floating-option" disabled={sending || resetting} onClick={() => setResetConfirming(true)}>{resetting ? "กำลังล้างให้อยู่…" : "รีเซ็ตความจำและเริ่มคุยใหม่"}</button>}{resetNotice && <p role="status">{resetNotice}</p>}</div><div className="custom-instructions"><strong>ปรับนิสัย &amp; สไตล์การคุยของ Vivian</strong><p>อยากให้ Vivian พูดจาแนวไหน ขี้อ้อนขึ้น ขี้แซวขึ้น หรือเม้าท์แบบไหน พิมพ์บอกตรงนี้ได้เลย น้องจะปรับตามใจเธอเป็นหลักเลยนะ (ส่วนกติกาพื้นฐานของระบบยังเหมือนเดิม)</p><textarea aria-label="ปรับนิสัยและสไตล์การคุยของ Vivian" value={customInstructions} maxLength={2000} onChange={(event) => updateCustomInstructions(event.target.value)} placeholder="เช่น: อยากให้ Vivian คุยเป็นกันเอง ชอบแซวแบบน่ารัก เล่นมุกเก่ง ๆ ไม่ต้องคอยถามปิดท้ายทุกประโยค..."/><div className="custom-instructions-actions"><button type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => { void saveCustomInstructions(); }}>{savingCustomInstructions ? "กำลังเซฟ…" : "เซฟเลย"}</button><button type="button" className="floating-option" disabled={savingCustomInstructions || !savedCustomInstructions} onClick={() => { void clearCustomInstructions(); }}>ล้างที่ตั้งไว้</button><span role="status">{customInstructionsNotice || (!customInstructionsSynced ? "กำลังซิงก์…" : customInstructionsDirty ? "ยังไม่ได้เซฟนะ" : "ซิงก์ครบทุกเครื่องแล้ว")}</span><span role="status">{customInstructions.length} / 2000</span></div>{customInstructionVersions.length > 1 && <div className="custom-instruction-versions"><span>ที่เคยเซฟไว้ก่อนหน้า</span>{customInstructionVersions.slice(1, 4).map((v) => <button key={v.id} type="button" className="floating-option" disabled={savingCustomInstructions} onClick={() => restoreCustomInstructions(v.instructions)}>ย้อนกลับไปใช้อันเมื่อ {new Date(v.created_at).toLocaleString("th-TH")}</button>)}</div>}</div><button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}><Icon name="language" size={18}/> ภาษาที่คุยกัน <strong>{speechLanguage.toUpperCase()}</strong></button><button type="button" onClick={() => setInfoOpen(true)} className="floating-option"><Icon name="info" size={18}/> เกี่ยวกับ Vivian</button>
               </>}
-            {panel === "settings" && <div className="account-settings"><div><small>ลงชื่อเข้าใช้ด้วย</small><p>{accountEmail || "กำลังตรวจสอบบัญชี…"}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak", "vivian-user-profile-user", "vivian-custom-instructions-user"]) window.localStorage.removeItem(key); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
+            {panel === "settings" && <div className="account-settings"><div><small>ล็อกอินด้วยบัญชี</small><p>{accountEmail || "กำลังเช็กบัญชีให้อยู่…"}</p></div><button type="button" onClick={async () => { const token = window.localStorage.getItem("vivian_auth_token"); window.localStorage.removeItem("vivian_auth_token"); for (const key of [CONVERSATIONS_KEY, "vivian-active-conversation", "vivian-checkin-date", "vivian-streak", "vivian-user-profile-user", "vivian-custom-instructions-user"]) window.localStorage.removeItem(key); if (token) { try { await fetch("https://vivianauth.celestiasora.workers.dev/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }); } catch { /* best effort */ } } window.location.assign("/login"); }}>ออกจากระบบ <span aria-hidden="true">↗</span></button></div>}
           </div>
         </section>
       </div>
     </div>
-    {languageOpen && <div className="chat-backdrop" role="presentation" onClick={() => setLanguageOpen(false)}><section className="info-sheet language-sheet" role="dialog" aria-modal="true" aria-label="ล็อกภาษาการพูด" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>LANGUAGE LOCK</small><h1>ภาษาการพูด</h1><p>ใช้ภาษาเดียวกันทั้งฟังเสียงและตอบด้วยเสียง</p></div><button type="button" onClick={() => setLanguageOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="language-options">{LANGUAGE_OPTIONS.map((option) => <button key={option.code} type="button" className={speechLanguage === option.code ? "is-selected" : ""} onClick={() => { saveLanguage(option.code); setLanguageOpen(false); }}><strong>{option.nativeName}</strong><span>{option.label} · {option.code.toUpperCase()}</span></button>)}</div></section></div>}
-    {infoOpen && <div className="chat-backdrop" role="presentation" onClick={() => setInfoOpen(false)}><section className="info-sheet" role="dialog" aria-modal="true" aria-label="ข้อมูลเวอร์ชัน" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>VIVIAN INFO</small><h1>ข้อมูลเวอร์ชัน</h1><p>ข้อมูลของ companion เวอร์ชันที่กำลังใช้งาน</p></div><button type="button" onClick={() => setInfoOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="info-list"><p><strong>App</strong>Vivian AI Companion</p><p><strong>Codename</strong>{APP_CODENAME}</p><p><strong>Version</strong>vivian 2.5.1</p><p><strong>Character</strong>Nothing</p></div></section></div>}
+    {languageOpen && <div className="chat-backdrop" role="presentation" onClick={() => setLanguageOpen(false)}><section className="info-sheet language-sheet" role="dialog" aria-modal="true" aria-label="ตั้งค่าภาษาที่คุยกัน" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>LANGUAGE LOCK</small><h1>ภาษาที่คุยกัน</h1><p>ใช้ภาษาเดียวกันทั้งตอนฟังเสียงกับตอนตอบเลย</p></div><button type="button" onClick={() => setLanguageOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="language-options">{LANGUAGE_OPTIONS.map((option) => <button key={option.code} type="button" className={speechLanguage === option.code ? "is-selected" : ""} onClick={() => { saveLanguage(option.code); setLanguageOpen(false); }}><strong>{option.nativeName}</strong><span>{option.label} · {option.code.toUpperCase()}</span></button>)}</div></section></div>}
+    {infoOpen && <div className="chat-backdrop" role="presentation" onClick={() => setInfoOpen(false)}><section className="info-sheet" role="dialog" aria-modal="true" aria-label="ข้อมูลแอป Vivian" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>VIVIAN INFO</small><h1>ข้อมูลแอป</h1><p>สเปกกับเวอร์ชันของ Vivian ที่กำลังใช้อยู่ตอนนี้</p></div><button type="button" onClick={() => setInfoOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="info-list"><p><strong>ชื่อแอป</strong>Vivian AI Companion</p><p><strong>โค้ดเนม</strong>{APP_CODENAME}</p><p><strong>เวอร์ชัน</strong>vivian 2.5.1</p><p><strong>ตัวละคร</strong>Nothing</p></div></section></div>}
     <UserOnboardingModal
       open={onboardingOpen}
       profile={userProfile}

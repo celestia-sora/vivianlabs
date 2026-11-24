@@ -25,7 +25,7 @@ export async function sceneRequest<T>(path: string, options?: RequestInit): Prom
   const data = await response.json();
   if (!response.ok) {
     throw new SceneRequestError(
-      data.error ?? "Could not save scene changes. Please try again.",
+      data.error ?? "เซฟฉากไม่ติดแฮะ ลองกดใหม่อีกรอบน้า",
       response.status,
       typeof data.code === "string" ? data.code : undefined,
       typeof data.requiredTier === "string" ? data.requiredTier : undefined,
@@ -108,7 +108,7 @@ export function useSceneLibrary(presetImages: string[] = noPresetImages, account
         const saved = await sceneRequest<{ preferences: ScenePreferences }>("/api/scenes/preferences", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
         if (mounted.current && version === generation.current) { preferencesRef.current = saved.preferences; setPreferences(saved.preferences); }
       } catch (error) {
-        if (mounted.current && version === generation.current) setNotice(`${(error as Error).message} Your scene is shown locally; select it again to retry saving.`);
+        if (mounted.current && version === generation.current) setNotice(`${(error as Error).message} โชว์ฉากให้บนเครื่องนี้ก่อนนะ ถ้าจะเซฟขึ้นคลาวด์ลองกดเลือกอีกทีได้เลย`);
       } finally { pending.current--; if (mounted.current && !pending.current) setBusy(false); }
     });
     return writeQueue.current;

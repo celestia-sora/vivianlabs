@@ -63,7 +63,7 @@ test("tier badge & chat quota formatters match Free, Selected, Sorachan specs", 
       usageDate: "2026-11-23",
       resetAt: "2026-11-23T17:00:00.000Z",
     }),
-    "Free · 3/5 chats today",
+    "Free · เหลือ 3/5 ข้อความวันนี้",
   );
   assert.equal(
     tierPanel.formatTierChatBadge("selected", {
@@ -75,7 +75,7 @@ test("tier badge & chat quota formatters match Free, Selected, Sorachan specs", 
       usageDate: "2026-11-23",
       resetAt: "2026-11-23T17:00:00.000Z",
     }),
-    "Selected · 18/20 chats today",
+    "Selected · เหลือ 18/20 ข้อความวันนี้",
   );
   assert.equal(
     tierPanel.formatTierChatBadge("free", {
@@ -87,9 +87,9 @@ test("tier badge & chat quota formatters match Free, Selected, Sorachan specs", 
       usageDate: "2026-11-23",
       resetAt: "2026-11-23T17:00:00.000Z",
     }),
-    "Free · 0/5 chats today",
+    "Free · เหลือ 0/5 ข้อความวันนี้",
   );
-  assert.equal(tierPanel.formatTierChatBadge("sorachan", null), "Sorachan · Unlimited");
+  assert.equal(tierPanel.formatTierChatBadge("sorachan", null), "Sorachan · คุยได้ไม่อั้น");
   assert.equal(tierPanel.formatPersonalMb(512 * 1024 * 1024), "512.0 MB");
   assert.equal(tierPanel.formatPersonalMb(0), "0.0 MB");
 });
@@ -117,14 +117,14 @@ test("isQuotaDepleted respects remaining count, Sorachan unlimited, and Bangkok 
   );
 });
 
-test("vivianQuotaExceededReply stays in character, mentions UTC+7 reset, and never says connection lost", () => {
+test("vivianQuotaExceededReply stays in character, mentions Bangkok reset, and never says connection lost", () => {
   for (const tier of ["free", "selected"]) {
     const reply = tierPanel.vivianQuotaExceededReply(tier);
-    assert.doesNotMatch(reply, /การเชื่อมต่อขาด/);
-    assert.match(reply, /UTC\+7/);
+    assert.doesNotMatch(reply, /การเชื่อมต่อขาด|เน็ตหลุดเฉย/);
+    assert.match(reply, /เวลาไทย/);
     assert.match(reply, /เที่ยงคืน/);
   }
-  assert.match(tierPanel.vivianQuotaExceededReply("free"), /Selected Tier/);
+  assert.match(tierPanel.vivianQuotaExceededReply("free"), /Selected/);
 
   const mailto = tierPanel.buildClientMailtoUrl({
     userEmail: "reader@example.com",
@@ -350,8 +350,8 @@ test("companion sendMessage handles QUOTA_EXCEEDED and pre-flight zero quota wit
   assert.equal(h1.state.draft, "สวัสดีวิเวียน");
   assert.equal(h1.state.messages.length, 1);
   assert.equal(h1.state.messages[0].from, "vivian");
-  assert.doesNotMatch(h1.state.messages[0].text, /การเชื่อมต่อขาด/);
-  assert.match(h1.state.messages[0].text, /Selected Tier/);
+  assert.doesNotMatch(h1.state.messages[0].text, /การเชื่อมต่อขาด|เน็ตหลุดเฉย/);
+  assert.match(h1.state.messages[0].text, /Selected/);
 
   // 2. Pre-flight blocks when remaining === 0 before resetAt (no network call)
   await h1.sendMessage();
@@ -465,8 +465,8 @@ test("StorageStatusPanel renders Free gate, Selected 512 MB personal meter, and 
     onRequestSelected: () => {},
   });
   const freeText = collectText(freeTree);
-  assert.match(freeText, /ต้องเป็น Selected tier ขึ้นไปจึงจะใช้ Cloud R2 ได้ \(นำเข้าแบบ local บนเครื่องได้ปกติ\)/);
-  assert.match(freeText, /Request Selected Tier/);
+  assert.match(freeText, /ฟีเจอร์ Cloud R2 ต้องอัปเป็น Selected ขึ้นไปก่อนน้า \(แต่เอาโมเดลลงเครื่องเล่นได้ปกติเลย\)/);
+  assert.match(freeText, /ขออัปเป็น Selected/);
 
   const selectedTree = storageMod.StorageStatusPanel({
     account: {
@@ -481,7 +481,7 @@ test("StorageStatusPanel renders Free gate, Selected 512 MB personal meter, and 
     },
   });
   const selectedText = collectText(selectedTree);
-  assert.match(selectedText, /Personal Cloud R2/);
+  assert.match(selectedText, /Cloud R2 ส่วนตัว/);
   assert.match(selectedText, /128\.0 MB \/ 512 MB/);
   assert.doesNotMatch(selectedText, /8 GB|Sorachan|shared/i);
 });
@@ -506,8 +506,8 @@ test("SceneManager hides upload when cloudAllowed is false and shows Thai tier g
     onRequestSelected: () => {},
   });
   const gatedText = collectText(gatedTree);
-  assert.match(gatedText, /ต้องเป็น Selected tier ขึ้นไปจึงจะใช้ Cloud R2 ได้ \(นำเข้าแบบ local บนเครื่องได้ปกติ\)/);
-  assert.match(gatedText, /Request Selected Tier/);
+  assert.match(gatedText, /ฟีเจอร์ Cloud R2 ต้องอัปเป็น Selected ขึ้นไปก่อนน้า \(แต่เอาโมเดลลงเครื่องเล่นได้ปกติเลย\)/);
+  assert.match(gatedText, /ขออัปเป็น Selected/);
 });
 
 test("UI pages & components remove invite-only copy, preserve local models, and gate admin/mailto correctly", () => {

@@ -17,5 +17,5 @@ export function rateLimit(request: Request, key: string, limit = 30, windowMs = 
 }
 
 export function rateLimitedResponse(retryAfter = 60) {
-  return Response.json({ error: "คำขอถี่เกินไปค่ะ กรุณารอสักครู่นะคะ", code: "RATE_LIMITED" }, { status: 429, headers: { "Retry-After": String(retryAfter), "Cache-Control": "no-store" } });
+  return Response.json({ error: "รัวเกินไปแล้วเธอ พักหายใจแป๊บนึงค่อยส่งใหม่น้า", code: "RATE_LIMITED" }, { status: 429, headers: { "Retry-After": String(retryAfter), "Cache-Control": "no-store" } });
 }

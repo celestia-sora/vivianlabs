@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     if (response.ok) data = await response.json();
   } catch (error) {
     console.warn("ElevenLabs STT timed out or failed", error);
-    return NextResponse.json({ error: "ถอดเสียงไม่สำเร็จ ลองใหม่อีกครั้งนะคะ" }, { status: 504 });
+    return NextResponse.json({ error: "แกะเสียงไม่ทันแฮะ ลองพูดใหม่อีกทีนะ" }, { status: 504 });
   }
   if (!response.ok) {
     console.warn("ElevenLabs STT rejected", { status: response.status, mimeType: file.type, size: file.size });
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   const providerDurationMs = Date.now() - providerStarted;
   if (typeof data !== "object" || data === null || !("text" in data) || typeof data.text !== "string") {
     console.warn("ElevenLabs STT returned an invalid response", { mimeType: file.type, size: file.size, language, providerDurationMs });
-    return NextResponse.json({ error: "ผลถอดเสียงจากผู้ให้บริการไม่ถูกต้อง ลองใหม่อีกครั้งนะคะ" }, { status: 502, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ error: "ระบบถอดเสียงแอบเอ๋อ ลองพูดใหม่อีกทีน้า" }, { status: 502, headers: { "Cache-Control": "no-store" } });
   }
   const detectedLanguage = "language_code" in data && typeof data.language_code === "string" ? data.language_code : null;
   const languageProbability = "language_probability" in data && typeof data.language_probability === "number" ? data.language_probability : null;

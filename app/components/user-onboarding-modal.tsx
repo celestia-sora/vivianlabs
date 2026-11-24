@@ -51,7 +51,7 @@ export function UserOnboardingModal({
     if (saving) return;
     const trimmedName = displayName.trim();
     if (!trimmedName) {
-      setError("บอกชื่อหรือชื่อเล่นที่อยากให้วิเวียนเรียกสักนิดนึงนะคะ");
+      setError("อย่าเพิ่งเทสิ บอกชื่อเล่นให้วิเวียนเรียกสักนิดนึงน้า");
       return;
     }
     setError(null);
@@ -76,9 +76,9 @@ export function UserOnboardingModal({
         <div className="memory-sheet-head">
           <div>
             <small>WELCOME TO VIVIAN</small>
-            <h1>มาทำความรู้จักกันก่อนนะคะ</h1>
+            <h1>ทักทายกันก่อนสักนิดป่ะ~</h1>
             <p>
-              อ๊ะ... เพิ่งเคยเจอกันใช่ไหมคะ บอกชื่อกับสไตล์ที่คุณชอบไว้หน่อยสิ ไม่ได้อยากรู้เป็นพิเศษสักหน่อย... แค่จะได้เรียกถูกเฉย ๆ ค่ะ!
+              อ๊ะ... เพิ่งเคยเจอกันป่ะเนี่ย บอกชื่อกับฟีลที่ชอบไว้หน่อยดิ ไม่ได้อยากสนิทเป็นพิเศษหรอกนะ... แค่ไม่อยากเรียกผิดแล้วมันช็อตฟีลเฉย ๆ แหละ!
             </p>
           </div>
           <button type="button" onClick={onSkip} aria-label="ปิด">
@@ -88,12 +88,12 @@ export function UserOnboardingModal({
 
         <form className="tier-request-form onboarding-form" onSubmit={(event) => void handleSubmit(event)}>
           <label>
-            <span>ชื่อหรือชื่อเล่นที่อยากให้ Vivian เรียก *</span>
+            <span>อยากให้ Vivian เรียกเธอว่าอะไรดี *</span>
             <input
               type="text"
               maxLength={MAX_PROFILE_DISPLAY_NAME_LENGTH}
               value={displayName}
-              placeholder="เช่น พี่ภัทร, คุณมิน, หรือชื่อเล่นของคุณ"
+              placeholder="เช่น พี่ภัทร, ต้าวมิน, หรือชื่อเล่นเก๋ ๆ ของเธอ"
               disabled={saving}
               autoFocus
               onChange={(event) => {
@@ -104,8 +104,8 @@ export function UserOnboardingModal({
           </label>
 
           <div className="onboarding-preset-group">
-            <span className="onboarding-field-label">ความสัมพันธ์เบื้องต้นกับ Vivian</span>
-            <div className="onboarding-preset-grid" role="radiogroup" aria-label="ความสัมพันธ์เบื้องต้นกับ Vivian">
+            <span className="onboarding-field-label">อยากเริ่มคุยกันฟีลไหนดีกับ Vivian</span>
+            <div className="onboarding-preset-grid" role="radiogroup" aria-label="อยากเริ่มคุยกันฟีลไหนดีกับ Vivian">
               {RELATIONSHIP_PRESETS.map((preset) => {
                 const selected = relationship === preset.key;
                 return (
@@ -127,23 +127,23 @@ export function UserOnboardingModal({
           </div>
 
           <label>
-            <span>สรรพนามหรือคำเรียกที่ใช้คุยกัน (ไม่บังคับ)</span>
+            <span>คำเรียกแทนตัว / หางเสียงที่ชอบ (ข้ามได้น้า)</span>
             <input
               type="text"
               maxLength={MAX_PROFILE_PRONOUNS_LENGTH}
               value={pronouns}
-              placeholder="เช่น เรียกแทนตัวเองว่า เรา/พี่, ให้วิเวียนลงท้ายว่า ค่ะ/นะคะ"
+              placeholder="เช่น เรียกตัวเองว่า เรา/เค้า ให้วิเวียนลงท้าย นะ/งับ หรือ ค่ะ"
               disabled={saving}
               onChange={(event) => setPronouns(event.target.value)}
             />
           </label>
 
           <label>
-            <span>สไตล์การพูด / เรื่องที่สนใจ (ไม่บังคับ)</span>
+            <span>แนวที่ชอบคุย / สไตล์ที่อยากให้วิเวียนพูดด้วย (ข้ามได้น้า)</span>
             <textarea
               maxLength={MAX_PROFILE_STYLE_NOTES_LENGTH}
               value={styleNotes}
-              placeholder="เช่น ชอบคุยเรื่องเกม อนิเมะ เขียนโค้ด อยากให้วิเวียนขี้แกล้งหรืออ้อนนิด ๆ..."
+              placeholder="เช่น อินเกม อนิเมะ เขียนโค้ด ชอบให้วิเวียนกวน ๆ เล่นมีม หรืออ้อนหน่อย ๆ..."
               disabled={saving}
               onChange={(event) => setStyleNotes(event.target.value)}
             />
@@ -162,14 +162,14 @@ export function UserOnboardingModal({
               disabled={saving}
               onClick={onSkip}
             >
-              ไว้ตั้งค่าทีหลัง
+              ไว้ทีหลังละกัน
             </button>
             <button
               type="submit"
               className="floating-option model-import-primary"
               disabled={saving}
             >
-              {saving ? "กำลังบันทึก…" : "บันทึกและเริ่มคุยกับ Vivian"}
+              {saving ? "แป๊บนึง กำลังเซฟ…" : "เซฟแล้วไปคุยกับ Vivian เลย!"}
             </button>
           </div>
         </form>
@@ -197,17 +197,17 @@ export function UserProfileSettingsCard({
     <div className="custom-instructions user-profile-card">
       <div className="tier-settings-head">
         <div>
-          <strong>Your Companion Profile (ข้อมูลส่วนตัวของคุณ)</strong>
+          <strong>โปรไฟล์คู่คุยของเธอ</strong>
           <p>
-            ชื่อที่ให้เรียก: <strong>{profile.displayName || "ยังไม่ได้ตั้งชื่อ"}</strong> · ความสัมพันธ์: {presetLabel}
+            ให้เรียก: <strong>{profile.displayName || "ยังไม่ได้ตั้งชื่อเลย"}</strong> · ฟีล: {presetLabel}
           </p>
         </div>
       </div>
       {(profile.pronouns || profile.styleNotes) && (
         <p>
-          {profile.pronouns ? `สรรพนาม: ${profile.pronouns}` : ""}
+          {profile.pronouns ? `คำเรียก: ${profile.pronouns}` : ""}
           {profile.pronouns && profile.styleNotes ? " · " : ""}
-          {profile.styleNotes ? `สไตล์/ความสนใจ: ${profile.styleNotes}` : ""}
+          {profile.styleNotes ? `สไตล์ที่ชอบ: ${profile.styleNotes}` : ""}
         </p>
       )}
       <div className="custom-instructions-actions">
@@ -217,7 +217,7 @@ export function UserProfileSettingsCard({
           disabled={saving}
           onClick={onOpenModal}
         >
-          ตั้งค่าชื่อและโปรไฟล์ของคุณ
+          แก้ชื่อกับสไตล์ที่ชอบ
         </button>
         {notice && <span role="status">{notice}</span>}
       </div>

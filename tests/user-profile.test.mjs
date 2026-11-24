@@ -281,12 +281,12 @@ test("UserOnboardingModal and UserProfileSettingsCard render onboarding fields a
     onSkip: () => {},
   });
   const text = collectText(tree);
-  assert.match(text, /มาทำความรู้จักกันก่อนนะคะ/);
-  assert.match(text, /ชื่อหรือชื่อเล่นที่อยากให้ Vivian เรียก/);
-  assert.match(text, /เพื่อนสนิท \(Close Friend\)/);
+  assert.match(text, /ทักทายกันก่อนสักนิดป่ะ~/);
+  assert.match(text, /อยากให้ Vivian เรียกเธอว่าอะไรดี/);
+  assert.match(text, /เพื่อนซี้ \(Close Friend\)/);
   assert.match(text, /รุ่นพี่ \/ รุ่นน้อง \(Senior \/ Junior\)/);
   assert.match(text, /คนคุย \/ คนพิเศษ \(Special Person\)/);
-  assert.match(text, /บันทึกและเริ่มคุยกับ Vivian/);
+  assert.match(text, /เซฟแล้วไปคุยกับ Vivian เลย!/);
 
   const cardTree = modalMod.UserProfileSettingsCard({
     profile: {
@@ -305,7 +305,7 @@ test("UserOnboardingModal and UserProfileSettingsCard render onboarding fields a
   const cardText = collectText(cardTree);
   assert.match(cardText, /พี่ภัทร/);
   assert.match(cardText, /รุ่นพี่ \/ รุ่นน้อง/);
-  assert.match(cardText, /ตั้งค่าชื่อและโปรไฟล์ของคุณ/);
+  assert.match(cardText, /โปรไฟล์คู่คุยของเธอ/);
 });
 
 test("/api/chat strictly isolates non-Sorachan accounts (even before onboarding) and sanitizes legacy assistant turns", async () => {

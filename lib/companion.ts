@@ -132,7 +132,7 @@ export function applyConversationTurn(state: CompanionState, userText: string, r
 }
 
 export function moodLabel(mood: Mood) {
-  const labels: Record<Mood, string> = { calm: "สงบ", warm: "อบอุ่น", playful: "ขี้เล่น", tired: "อ่อนล้า", melancholy: "อ่อนไหว", yandere: "เขินกลบเกลื่อน" };
+  const labels: Record<Mood, string> = { calm: "ชิลล์ ๆ", warm: "ใจฟู", playful: "ขี้แกล้ง", tired: "แอบง่วง/เพลีย", melancholy: "แอบนอยด์", yandere: "เขินกลบเกลื่อน" };
   return labels[mood];
 }
 

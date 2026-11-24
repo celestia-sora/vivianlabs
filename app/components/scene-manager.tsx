@@ -45,7 +45,7 @@ export function SceneManager({
   function chooseFile(image?: File) {
     setError(null); setTierRequiredError(false); setPreview(null); setFile(null);
     if (!image) return;
-    if (!SCENE_MIME_TYPES.includes(image.type) || image.size > SCENE_MAX_BYTES || !image.size) { setError("Choose a JPG, PNG, WebP or AVIF image under 8 MB."); return; }
+    if (!SCENE_MIME_TYPES.includes(image.type) || image.size > SCENE_MAX_BYTES || !image.size) { setError("ขอรูป JPG, PNG, WebP หรือ AVIF ที่ขนาดไม่เกิน 8 MB น้า"); return; }
     setFile(image); setPreview(URL.createObjectURL(image));
   }
   async function previewUrl() {
@@ -54,7 +54,7 @@ export function SceneManager({
     try {
       validateSceneLabel(label);
       const parsed = new URL(url);
-      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Enter an HTTP or HTTPS image URL.");
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("ใส่ลิงก์รูปที่ขึ้นต้นด้วย http:// หรือ https:// นะ");
       const response = await authFetch("/api/scenes/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label, url }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]) });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
@@ -62,11 +62,11 @@ export function SceneManager({
           setTierRequiredError(true);
           throw new Error(CLOUD_TIER_REQUIRED_MESSAGE);
         }
-        throw new Error(payload.error ?? "Image import failed.");
+        throw new Error(payload.error ?? "ดึงรูปจากลิงก์ไม่สำเร็จแฮะ");
       }
       const blob = await response.blob();
       if (!controller.signal.aborted) setPreview(URL.createObjectURL(blob));
-    } catch (error) { if (!controller.signal.aborted) setError((error as Error).message === "Invalid URL" ? "Enter a valid image URL." : (error as Error).message); }
+    } catch (error) { if (!controller.signal.aborted) setError((error as Error).message === "Invalid URL" ? "ลิงก์รูปนี้ดูแปลก ๆ นะ วางใหม่อีกรอบสิ" : (error as Error).message); }
     finally { setWorking(false); }
   }
   async function save(event: React.FormEvent) {
@@ -75,14 +75,14 @@ export function SceneManager({
       const validatedLabel = validateSceneLabel(label);
       let options: RequestInit;
       if (editor?.replace && mode === "upload") {
-        if (!file) throw new Error("Choose an image.");
+        if (!file) throw new Error("เลือกรูปก่อนน้า ยังไม่มีรูปเลย");
         const body = new FormData(); body.set("label", validatedLabel); body.set("image", file);
         options = { body };
       } else options = { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: validatedLabel, ...(editor?.replace ? { url } : {}) }) };
       const { scene } = await sceneRequest<{ scene: VivianScene }>(editor?.scene ? `/api/scenes/${editor.scene.id}` : "/api/scenes", { ...options, method: editor?.scene ? "PATCH" : "POST" });
       library.invalidateRequests();
       await library.refresh();
-      setEditor(null); setSuccess(`Saved ${scene.label}.`);
+      setEditor(null); setSuccess(`เซฟฉาก "${scene.label}" เรียบร้อย จึ้งเลย!`);
     } catch (error) {
       if (error instanceof SceneRequestError && error.code === "TIER_REQUIRED") {
         setTierRequiredError(true);
@@ -98,7 +98,7 @@ export function SceneManager({
     try {
       await sceneRequest(`/api/scenes/${scene.id}`, { method: "DELETE" });
       library.invalidateRequests();
-      await library.refresh(); setDeleting(null); setSuccess("Scene deleted.");
+      await library.refresh(); setDeleting(null); setSuccess("ลบฉากนี้ทิ้งให้แล้วน้า");
     } catch (error) { setError((error as Error).message); }
     finally { setWorking(false); }
   }
@@ -106,12 +106,12 @@ export function SceneManager({
   if (!cloudAllowed) {
     return <div className="scene-manager">
       <div className="tier-gate-notice" role="note">
-        <strong>Private Cloud Scenes · Selected Tier ขึ้นไป</strong>
+        <strong>ฉากส่วนตัวบน Cloud · ต้องเป็น Selected ขึ้นไปน้า</strong>
         <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
-        <small>ฉากสำเร็จรูปด้านล่าง (Christmas Day / Night) ยังสามารถเปลี่ยนและใช้งานได้ตามปกติค่ะ</small>
+        <small>แต่ฉากสำเร็จรูปข้างล่าง (Christmas Day / Night) ยังกดเปลี่ยนเล่นได้ชิลล์ ๆ เหมือนเดิมเลย!</small>
         {onRequestSelected && (
           <button type="button" className="floating-option model-import-primary" onClick={onRequestSelected}>
-            Request Selected Tier
+            ขออัปเป็น Selected
           </button>
         )}
       </div>
@@ -119,7 +119,7 @@ export function SceneManager({
   }
 
   return <div className="scene-manager">
-    {library.notice && <div role="alert" className="model-notice">{library.notice}{!library.ready && <button type="button" className="floating-option" onClick={() => void library.refresh().catch((error: Error) => library.setNotice(error.message))}>Retry loading scenes</button>}</div>}
+    {library.notice && <div role="alert" className="model-notice">{library.notice}{!library.ready && <button type="button" className="floating-option" onClick={() => void library.refresh().catch((error: Error) => library.setNotice(error.message))}>โหลดฉากใหม่อีกที</button>}</div>}
     {success && <p role="status" className="floating-note">{success}</p>}
     {!editor && library.scenes.length < SCENE_MAX_COUNT && <AnimatedFileUpload
       accept={SCENE_MIME_TYPES.join(",")}
@@ -134,13 +134,13 @@ export function SceneManager({
         chooseFile(image);
       }}
     />}
-    {editor && <form className="scene-editor" aria-label={editor.scene ? "Edit Scene" : "Add Scene"} onSubmit={(event) => void save(event)}>
-      <h3>{editor.scene ? editor.replace ? "Replace Image" : "Edit Label" : "Add Scene"}</h3>
-      <label>Scene label<input ref={labelInput} value={label} maxLength={100} required placeholder="ห้องนอนตอนกลางคืน" onChange={(event) => setLabel(event.target.value)} disabled={working}/></label>
-      <small>{[...label.trim().normalize("NFC")].length}/50 characters</small>
+    {editor && <form className="scene-editor" aria-label={editor.scene ? "แก้ฉาก" : "เพิ่มฉากใหม่"} onSubmit={(event) => void save(event)}>
+      <h3>{editor.scene ? editor.replace ? "เปลี่ยนรูปฉากใหม่" : "แก้ชื่อฉาก" : "เพิ่มฉากใหม่"}</h3>
+      <label>ตั้งชื่อฉาก<input ref={labelInput} value={label} maxLength={100} required placeholder="เช่น ห้องนอนตอนกลางคืน คาเฟ่ชิลล์ ๆ" onChange={(event) => setLabel(event.target.value)} disabled={working}/></label>
+      <small>{[...label.trim().normalize("NFC")].length}/50 ตัวอักษร</small>
       {editor.replace && <>
-        <p className="floating-note">Image source</p>
-        <div className="floating-tabs">{(["upload", "url"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value} className={mode === value ? "is-selected" : ""} disabled={working} onClick={() => { setMode(value); setFile(null); setPreview(null); setError(null); setTierRequiredError(false); }}>{value === "upload" ? "Upload Image" : "Image URL"}</button>)}</div>
+        <p className="floating-note">เอารูปมาจากไหนดี</p>
+        <div className="floating-tabs">{(["upload", "url"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value} className={mode === value ? "is-selected" : ""} disabled={working} onClick={() => { setMode(value); setFile(null); setPreview(null); setError(null); setTierRequiredError(false); }}>{value === "upload" ? "อัปโหลดรูปจากเครื่อง" : "วางลิงก์รูป"}</button>)}</div>
         {mode === "upload" ? <AnimatedFileUpload
           accept={SCENE_MIME_TYPES.join(",")}
           className="vivian-upload"
@@ -148,21 +148,21 @@ export function SceneManager({
           maxSize={SCENE_MAX_BYTES}
           multiple={false}
           onFilesSelected={(files) => chooseFile(files[0])}
-        /> : <><label>Image URL<input type="url" required value={url} placeholder="https://example.com/wallpaper.jpg" disabled={working} onChange={(event) => { setUrl(event.target.value); setPreview(null); }}/></label><button type="button" className="floating-option" disabled={working || !url} onClick={() => void previewUrl()}>Preview image</button></>}
+        /> : <><label>ลิงก์รูปภาพ<input type="url" required value={url} placeholder="https://example.com/wallpaper.jpg" disabled={working} onChange={(event) => { setUrl(event.target.value); setPreview(null); }}/></label><button type="button" className="floating-option" disabled={working || !url} onClick={() => void previewUrl()}>ลองดูภาพตัวอย่าง</button></>}
       </>}
-      {preview && <div className="scene-preview"><p className="floating-note">Preview</p><img src={preview} alt="Scene preview" onError={() => { setPreview(null); setError("Could not preview this image. Choose a valid image."); }}/></div>}
-      {error && <div className="model-notice" role="alert"><p style={{ margin: 0 }}>{error}</p>{tierRequiredError && onRequestSelected && <button type="button" className="floating-option model-import-primary" onClick={onRequestSelected}>Request Selected Tier</button>}</div>}
-      <div className="scene-editor-actions"><button type="button" className="floating-option" disabled={working} onClick={() => { setEditor(null); setPreview(null); setError(null); setTierRequiredError(false); }}>Cancel</button><button type="submit" className="floating-option model-import-primary" disabled={working}>{working ? "Working…" : "Save Scene"}</button></div>
+      {preview && <div className="scene-preview"><p className="floating-note">ตัวอย่างฉาก</p><img src={preview} alt="ตัวอย่างฉาก" onError={() => { setPreview(null); setError("พรีวิวรูปนี้ไม่ได้แฮะ ลองเปลี่ยนเป็นรูปอื่นดูนะ"); }}/></div>}
+      {error && <div className="model-notice" role="alert"><p style={{ margin: 0 }}>{error}</p>{tierRequiredError && onRequestSelected && <button type="button" className="floating-option model-import-primary" onClick={onRequestSelected}>ขออัปเป็น Selected</button>}</div>}
+      <div className="scene-editor-actions"><button type="button" className="floating-option" disabled={working} onClick={() => { setEditor(null); setPreview(null); setError(null); setTierRequiredError(false); }}>ยกเลิก</button><button type="submit" className="floating-option model-import-primary" disabled={working}>{working ? "แป๊บ กำลังเซฟ…" : "เซฟฉากเลย"}</button></div>
     </form>}
     {!editor && error && <p className="model-notice" role="alert">{error}</p>}
-    {!library.ready && !library.notice && <p className="floating-note" role="status">Loading scenes…</p>}
-    {!editor && library.ready && !library.scenes.length && <p className="floating-empty">Add an image and write its label to start your scene library.</p>}
+    {!library.ready && !library.notice && <p className="floating-note" role="status">กำลังโหลดฉากสวย ๆ แป๊บ…</p>}
+    {!editor && library.ready && !library.scenes.length && <p className="floating-empty">ยังไม่มีฉากของตัวเองเลย โยนรูปเข้ามาแล้วตั้งชื่อเก๋ ๆ มาเริ่มคอลเลกชันกัน!</p>}
     <div className="custom-scene-grid">{library.scenes.map((scene) => <article key={scene.id} className={library.preferences.activeSceneId === scene.id ? "is-selected" : ""}>
       <button type="button" className="custom-scene-select" disabled={working} aria-pressed={library.preferences.activeSceneId === scene.id} onClick={() => void library.selectScene(scene.id)}>
-        <img className="custom-scene-image" src={scene.thumbnailUrl} alt="" loading="lazy"/><strong>{scene.label}</strong><small>{library.preferences.activeSceneId === scene.id ? "Current scene" : "Apply scene"}</small>
+        <img className="custom-scene-image" src={scene.thumbnailUrl} alt="" loading="lazy"/><strong>{scene.label}</strong><small>{library.preferences.activeSceneId === scene.id ? "ใช้อยู่ตอนนี้" : "กดใช้ฉากนี้"}</small>
       </button>
-      <details className="scene-card-menu"><summary aria-label={`Actions for ${scene.label}`}>…</summary><div><button type="button" disabled={working} onClick={(event) => { closeMenu(event); open(scene, false); }}>Edit label</button><button type="button" disabled={working} onClick={(event) => { closeMenu(event); open(scene); }}>Replace image</button><button type="button" disabled={working} onClick={(event) => { closeMenu(event); setDeleting(scene.id); }}>Delete scene</button></div></details>
-      {deleting === scene.id && <div className="scene-delete-confirm" role="group" aria-label={`Delete ${scene.label}?`}><p>Delete this scene?</p><button type="button" className="floating-option" disabled={working} onClick={() => void remove(scene)}>Confirm delete</button><button type="button" className="floating-option" disabled={working} onClick={() => setDeleting(null)}>Cancel</button></div>}
+      <details className="scene-card-menu"><summary aria-label={`เมนูจัดการ ${scene.label}`}>…</summary><div><button type="button" disabled={working} onClick={(event) => { closeMenu(event); open(scene, false); }}>แก้ชื่อฉาก</button><button type="button" disabled={working} onClick={(event) => { closeMenu(event); open(scene); }}>เปลี่ยนรูปใหม่</button><button type="button" disabled={working} onClick={(event) => { closeMenu(event); setDeleting(scene.id); }}>ลบฉากนี้</button></div></details>
+      {deleting === scene.id && <div className="scene-delete-confirm" role="group" aria-label={`ลบฉาก ${scene.label} ไหม?`}><p>ลบฉากนี้จริงดิ?</p><button type="button" className="floating-option" disabled={working} onClick={() => void remove(scene)}>ลบเลย</button><button type="button" className="floating-option" disabled={working} onClick={() => setDeleting(null)}>ไม่ลบละ</button></div>}
     </article>)}</div>
   </div>;
 }

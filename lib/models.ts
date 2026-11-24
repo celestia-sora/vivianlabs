@@ -10,10 +10,10 @@ export const MODEL_CONFIG: Record<ModelKey, {
 };
 
 export const PERSONALITIES = {
-  shy: { label: "Quiet", description: "ขี้อาย สุภาพ และเก็บอาการมากขึ้น" },
-  playful: { label: "Playful", description: "ขี้เล่นและแอบเขินได้ง่ายขึ้น" },
-  elegant: { label: "Elegant", description: "สุขุม สุภาพ และรักษาท่าที" },
-  custom: { label: "Custom", description: "น้ำเสียงปากแข็งแบบ tsundere ในระดับที่กำหนดเอง" },
+  shy: { label: "นิ่งขี้อาย", description: "ขี้อาย เก็บอาการเก่ง พูดน้อยแต่แอบเขิน" },
+  playful: { label: "ขี้แกล้ง", description: "ขี้เล่น กวนนิด ๆ แซวเก่งแต่เขินง่าย" },
+  elegant: { label: "คูล ๆ", description: "นิ่ง ๆ คูล ๆ สุภาพแต่มีเสน่ห์" },
+  custom: { label: "ตัวแม่ซึน", description: "ซึนเดเระตัวแม่ ปากแข็งแต่ใส่ใจ" },
 } as const;
 
 export type PersonalityKey = keyof typeof PERSONALITIES;

@@ -73,7 +73,7 @@ export function useVoicePreferences() {
         setNotice("");
       }
     } catch {
-      if (alive.current && voiceVersion === voiceIdRevision.current) setNotice("โหลดค่ากลางไม่ได้ กรุณาลองใหม่");
+      if (alive.current && voiceVersion === voiceIdRevision.current) setNotice("โหลดค่าเสียงไม่ขึ้นแฮะ ลองใหม่อีกทีนะ");
     }
   }, []);
 
@@ -98,7 +98,7 @@ export function useVoicePreferences() {
     const version = ++voiceIdRevision.current;
     setVoiceId(trimmed);
     cacheVoiceId(trimmed);
-    setNotice("กำลังบันทึก…");
+    setNotice("แป๊บนะ กำลังเซฟ…");
     pending.current++;
     queue.current = queue.current.then(async () => {
       if (version !== voiceIdRevision.current) { pending.current--; return; }
@@ -108,9 +108,9 @@ export function useVoicePreferences() {
           body: JSON.stringify({ voiceId: trimmed }), signal: AbortSignal.timeout(9000), keepalive: true,
         });
         if (!response.ok) throw new Error();
-        if (alive.current && version === voiceIdRevision.current) setNotice("บันทึก Voice ID แล้ว · ใช้ร่วมกันทุกบัญชี (Global)");
+        if (alive.current && version === voiceIdRevision.current) setNotice("เซฟ Voice ID เรียบร้อย ใช้เหมือนกันทุกบัญชีเลย!");
       } catch {
-        if (alive.current && version === voiceIdRevision.current) setNotice("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+        if (alive.current && version === voiceIdRevision.current) setNotice("เซฟไม่ติดอะ ลองใหม่อีกรอบนะ");
       }
       finally { pending.current--; }
     });
@@ -121,7 +121,7 @@ export function useVoicePreferences() {
     const version = ++languageRevision.current;
     setLanguage(value);
     cacheLanguage(value);
-    setNotice("กำลังบันทึก…");
+    setNotice("แป๊บนะ กำลังเซฟ…");
     pending.current++;
     queue.current = queue.current.then(async () => {
       if (version !== languageRevision.current) { pending.current--; return; }
@@ -131,9 +131,9 @@ export function useVoicePreferences() {
           body: JSON.stringify({ speechLanguage: value }), signal: AbortSignal.timeout(9000), keepalive: true,
         });
         if (!response.ok) throw new Error();
-        if (alive.current && version === languageRevision.current) setNotice("บันทึกแล้ว · ภาษาเดียวกันทุกเครื่อง");
+        if (alive.current && version === languageRevision.current) setNotice("เซฟแล้ว! ใช้ภาษานี้เหมือนกันทุกเครื่องเลย");
       } catch {
-        if (alive.current && version === languageRevision.current) setNotice("บันทึกไม่สำเร็จ ภาษาใหม่จะใช้ในเครื่องนี้ก่อน");
+        if (alive.current && version === languageRevision.current) setNotice("ซิงก์คลาวด์ไม่ติด แต่ใช้ภาษาใหม่ในเครื่องนี้ให้ก่อนน้า");
       }
       finally { pending.current--; }
     });

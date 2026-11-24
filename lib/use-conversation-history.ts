@@ -76,7 +76,7 @@ export function useConversationHistory(initial: HistoryMessage | null, pendingTe
         }
         if (mounted.current && generation.current === currentGeneration) if (cloudAvailable.current) setNotice(null);
       } catch {
-        if (mounted.current && generation.current === currentGeneration) setNotice("ยังซิงก์แชตไม่ได้ เก็บสำรองบนอุปกรณ์นี้และจะลองใหม่");
+        if (mounted.current && generation.current === currentGeneration) setNotice("ยังซิงก์แชตขึ้นคลาวด์ไม่ได้นะ เซฟไว้ในเครื่องนี้ให้ก่อน เดี๋ยวลองส่งให้อีกที");
       }
     };
     saving.current = work();
@@ -111,7 +111,7 @@ export function useConversationHistory(initial: HistoryMessage | null, pendingTe
       cache(merged);
       setNotice(null);
     } catch {
-      if (mounted.current && !signal?.aborted && generation.current === currentGeneration) setNotice("โหลดประวัติจากคลาวด์ไม่ได้ กำลังใช้แชตสำรองบนอุปกรณ์นี้");
+      if (mounted.current && !signal?.aborted && generation.current === currentGeneration) setNotice("ดึงแชตจากคลาวด์ไม่ขึ้นแฮะ เปิดอันที่เซฟไว้ในเครื่องนี้ให้ก่อนน้า");
     } finally {
       if (refreshId === refreshCount.current) refreshing.current = false;
       if (mounted.current && !signal?.aborted && generation.current === currentGeneration) setReady(true);

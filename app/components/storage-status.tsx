@@ -45,9 +45,9 @@ function StorageMeter({
 }) {
   const percentage = used === null || limit <= 0 ? null : storagePercentage(used, limit);
   return <article className="storage-status-card">
-    <div className="storage-status-heading"><strong>{name}</strong><span>{percentage === null ? "Unavailable" : `${percentage.toFixed(1)}%`}</span></div>
-    <progress aria-label={`${name} storage usage`} max={100} value={percentage === null ? 0 : Math.min(100, percentage)} className={percentage !== null && percentage >= 90 ? "is-near-limit" : ""} />
-    <p>{used === null ? "Usage could not be checked" : usedText ?? `${formatStorageBytes(used)} used`}<span>{limitText ?? `${formatStorageBytes(limit)} capacity`}</span></p>
+    <div className="storage-status-heading"><strong>{name}</strong><span>{percentage === null ? "เช็กไม่ได้" : `${percentage.toFixed(1)}%`}</span></div>
+    <progress aria-label={`พื้นที่ใช้งานของ ${name}`} max={100} value={percentage === null ? 0 : Math.min(100, percentage)} className={percentage !== null && percentage >= 90 ? "is-near-limit" : ""} />
+    <p>{used === null ? "ยังเช็กพื้นที่ไม่ได้แฮะ" : usedText ?? `ใช้ไปแล้ว ${formatStorageBytes(used)}`}<span>{limitText ?? `เต็ม ${formatStorageBytes(limit)}`}</span></p>
     {description && <small>{description}</small>}
   </article>;
 }
@@ -70,11 +70,11 @@ export function StorageStatusPanel({
     const abort = new AbortController(); controller.current = abort;
     try {
       const response = await authFetch("/api/storage/status", { cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(12_000)]) });
-      if (!response.ok) throw new Error("Storage status is temporarily unavailable.");
+      if (!response.ok) throw new Error("ตอนนี้ยังเช็กพื้นที่ไม่ติดแฮะ ลองใหม่อีกแป๊บนะ");
       const next = await response.json() as StorageStatusResponse;
       if (!abort.signal.aborted) { setStatus(next); setNotice(null); }
     } catch {
-      if (!abort.signal.aborted) setNotice("Could not refresh storage usage. Showing the last available update.");
+      if (!abort.signal.aborted) setNotice("รีเฟรชล่าสุดไม่สำเร็จ โชว์ข้อมูลล่าสุดที่เช็กได้ให้ก่อนน้า");
     } finally { inFlight.current = false; if (!abort.signal.aborted) setRefreshing(false); }
   }, []);
   useEffect(() => {
@@ -93,12 +93,12 @@ export function StorageStatusPanel({
   if (isFree) {
     return <div className="storage-status-panel">
       <article className="storage-status-card tier-gate-card">
-        <div className="storage-status-heading"><strong>Cloud R2 Storage</strong><span className="tier-badge is-free">Free</span></div>
+        <div className="storage-status-heading"><strong>พื้นที่ Cloud R2</strong><span className="tier-badge is-free">Free</span></div>
         <p className="tier-gate-copy">{CLOUD_TIER_REQUIRED_MESSAGE}</p>
-        <small>โมเดลที่นำเข้าจาก ZIP/Folder จะถูกเก็บไว้ในเบราว์เซอร์เครื่องนี้ และฉากสำเร็จรูปยังคงใช้งานได้ตามปกติ</small>
+        <small>โมเดลที่เอาเข้าจากไฟล์ ZIP หรือโฟลเดอร์จะเซฟอยู่ในเครื่องนี้ให้เลย ส่วนฉากสำเร็จรูปก็สลับเล่นได้ตามปกติ</small>
         {onRequestSelected && (
           <button type="button" className="floating-option model-import-primary" onClick={onRequestSelected}>
-            Request Selected Tier
+            ขออัปเป็น Selected
           </button>
         )}
       </article>
@@ -123,36 +123,36 @@ export function StorageStatusPanel({
       status?.r2?.limitBytes ??
       account?.storage.limitBytes ??
       SELECTED_STORAGE_LIMIT_BYTES;
-    const usedMbLabel = personalUsed === null ? null : `${formatPersonalMb(personalUsed)} used`;
-    const limitMbLabel = `${Math.round(personalLimit / (1024 * 1024))} MB limit`;
+    const usedMbLabel = personalUsed === null ? null : `ใช้ไปแล้ว ${formatPersonalMb(personalUsed)}`;
+    const limitMbLabel = `โควตา ${Math.round(personalLimit / (1024 * 1024))} MB`;
 
     return <div className="storage-status-panel">
-      <p className="floating-note">Personal cloud storage usage refreshes automatically while this panel is open.</p>
+      <p className="floating-note">หน้านี้เช็กพื้นที่บนคลาวด์ส่วนตัวให้อัตโนมัติเรื่อย ๆ เลยน้า</p>
       <StorageMeter
-        name="Personal Cloud R2"
+        name="Cloud R2 ส่วนตัว"
         used={personalUsed}
         limit={personalLimit}
         usedText={usedMbLabel ? `${usedMbLabel} (${formatPersonalMb(personalUsed!)} / ${Math.round(personalLimit / (1024 * 1024))} MB)` : undefined}
         limitText={limitMbLabel}
-        description="พื้นที่จัดเก็บส่วนตัวบน Cloud R2 สำหรับโมเดล Live2D และฉากของคุณ (สูงสุด 512 MB)"
+        description="พื้นที่เก็บโมเดล Live2D กับฉากส่วนตัวของเธอไว้บน Cloud R2 (ได้สูงสุด 512 MB)"
       />
       <div className="storage-status-footer">
-        <small>{status?.checkedAt ? `Checked ${new Date(status.checkedAt).toLocaleTimeString()}` : "Checking personal storage…"}</small>
-        <button type="button" className="floating-option" disabled={refreshing} onClick={() => { void refresh(); }}>{refreshing ? "Refreshing…" : "Refresh"}</button>
+        <small>{status?.checkedAt ? `เช็กล่าสุด ${new Date(status.checkedAt).toLocaleTimeString()}` : "กำลังเช็กพื้นที่ให้อยู่…"}</small>
+        <button type="button" className="floating-option" disabled={refreshing} onClick={() => { void refresh(); }}>{refreshing ? "กำลังอัปเดต…" : "รีเฟรช"}</button>
       </div>
       {notice && <p role="status" className="model-notice">{notice}</p>}
     </div>;
   }
 
   return <div className="storage-status-panel">
-    <p className="floating-note">Storage usage refreshes every 5 seconds while this panel is open.</p>
-    <StorageMeter name="Supabase" used={status?.supabase?.usedBytes ?? null} limit={status?.supabase?.limitBytes ?? 1e9} description="File storage in this Supabase project." />
-    <StorageMeter name="Cloudflare R2" used={status?.r2?.usedBytes ?? null} limit={status?.r2?.limitBytes ?? 8e9} description={status?.r2?.connected ? "Models and scenes share 8 GB. The remaining 2 GB is an unused safety buffer." : "R2 connection is not available."} />
+    <p className="floating-note">หน้านี้จะอัปเดตพื้นที่ให้อัตโนมัติทุก 5 วิเลยนะ</p>
+    <StorageMeter name="ระบบเก็บข้อมูลแชต &amp; ความจำ" used={status?.supabase?.usedBytes ?? null} limit={status?.supabase?.limitBytes ?? 1e9} description="พื้นที่เก็บไฟล์แชตกับความทรงจำต่าง ๆ" />
+    <StorageMeter name="Cloud R2" used={status?.r2?.usedBytes ?? null} limit={status?.r2?.limitBytes ?? 8e9} description={status?.r2?.connected ? "โมเดลกับฉากใช้โควตารวมกัน 8 GB (เหลืออีก 2 GB กันเหนียวไว้ไม่ให้เต็ม)" : "ตอนนี้ยังต่อ Cloud R2 ไม่ได้แฮะ"} />
     <div className="storage-category-meters">
-      <StorageMeter name="Live2D models" used={status?.r2?.categories?.live2d.used ?? null} limit={8e9} description={status?.r2?.quotaUsage ? `Models committed: ${formatStorageBytes(status.r2.quotaUsage.live2d.used)} within the shared 8 GB budget.` : "Upload quota could not be checked."} />
-      <StorageMeter name="Scenes and other files" used={status?.r2?.categories?.other.used ?? null} limit={8e9} description={status?.r2?.quotaUsage ? `Scenes/other committed: ${formatStorageBytes(status.r2.quotaUsage.other.used)} within the shared 8 GB budget.` : "Upload quota could not be checked."} />
+      <StorageMeter name="โมเดล Live2D" used={status?.r2?.categories?.live2d.used ?? null} limit={8e9} description={status?.r2?.quotaUsage ? `ใช้พื้นที่โมเดลไปแล้ว ${formatStorageBytes(status.r2.quotaUsage.live2d.used)} จากโควตารวม 8 GB` : "ยังเช็กโควตาอัปโหลดไม่ได้แฮะ"} />
+      <StorageMeter name="ฉากและไฟล์อื่น ๆ" used={status?.r2?.categories?.other.used ?? null} limit={8e9} description={status?.r2?.quotaUsage ? `ใช้พื้นที่ฉาก/ไฟล์อื่นไปแล้ว ${formatStorageBytes(status.r2.quotaUsage.other.used)} จากโควตารวม 8 GB` : "ยังเช็กโควตาอัปโหลดไม่ได้แฮะ"} />
     </div>
-    <div className="storage-status-footer"><small>{status?.checkedAt ? `Checked ${new Date(status.checkedAt).toLocaleTimeString()}` : "Waiting for storage status…"}</small><button type="button" className="floating-option" disabled={refreshing} onClick={() => { void refresh(); }}>{refreshing ? "Refreshing…" : "Refresh"}</button></div>
+    <div className="storage-status-footer"><small>{status?.checkedAt ? `เช็กล่าสุด ${new Date(status.checkedAt).toLocaleTimeString()}` : "กำลังเช็กพื้นที่ให้อยู่…"}</small><button type="button" className="floating-option" disabled={refreshing} onClick={() => { void refresh(); }}>{refreshing ? "กำลังอัปเดต…" : "รีเฟรช"}</button></div>
     {notice && <p role="status" className="model-notice">{notice}</p>}
   </div>;
 }

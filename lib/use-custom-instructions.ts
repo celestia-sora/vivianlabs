@@ -107,7 +107,7 @@ export function useCustomInstructions() {
         setSavedValue(saved.instructions);
         setSynced(true);
         setValue(saved.instructions);
-        setNotice("ซิงก์คำแนะนำจากเครื่องนี้แล้ว");
+        setNotice("เอาข้อความปรับนิสัยจากเครื่องนี้ขึ้นคลาวด์ให้แล้วนะ");
         return;
       }
 
@@ -123,7 +123,7 @@ export function useCustomInstructions() {
       setNotice("");
     } catch {
       if (alive.current && version === revision.current) {
-        setNotice("ซิงก์คำแนะนำกับคลาวด์ไม่ได้ · ใช้ค่าบนเครื่องนี้");
+        setNotice("ต่อคลาวด์ไม่ติด เลยใช้ค่าที่เซฟในเครื่องนี้ไปก่อนน้า");
       }
     }
   }, []);
@@ -155,7 +155,7 @@ export function useCustomInstructions() {
     const version = ++revision.current;
     savingRef.current = true;
     setSaving(true);
-    setNotice("กำลังบันทึก…");
+    setNotice("แป๊บ กำลังเซฟ…");
     try {
       const saved = await writeRemote(target);
       if (saved === null) throw new Error();
@@ -167,9 +167,9 @@ export function useCustomInstructions() {
       setSavedValue(saved.instructions);
       setValue(saved.instructions);
       setSynced(true);
-      setNotice("บันทึกแล้ว");
+      setNotice("เซฟเรียบร้อย!");
     } catch {
-      if (alive.current && version === revision.current) setNotice("บันทึกไม่สำเร็จ · ลองอีกครั้ง");
+      if (alive.current && version === revision.current) setNotice("เซฟไม่ติดแฮะ ลองกดใหม่อีกทีนะ");
     } finally {
       savingRef.current = false;
       if (alive.current) setSaving(false);
@@ -191,9 +191,9 @@ export function useCustomInstructions() {
     revision.current += 1;
     setValue("");
     setSavedValue("");
-    setNotice("กำลังล้าง…");
+    setNotice("กำลังล้างให้แป๊บ…");
     const saved = await writeRemote("");
-    if (saved === null) { setNotice("ล้างไม่สำเร็จ · ลองอีกครั้ง"); return; }
+    if (saved === null) { setNotice("ล้างไม่สำเร็จอะ ลองใหม่อีกรอบนะ"); return; }
     userIdRef.current = saved.userId;
     try { window.localStorage.setItem(ACTIVE_USER_KEY, saved.userId); } catch { /* storage may be unavailable */ }
     markSynced(saved.userId);
@@ -201,7 +201,7 @@ export function useCustomInstructions() {
     setSavedValue(saved.instructions);
     setValue(saved.instructions);
     setSynced(true);
-    setNotice("ล้างคำแนะนำแล้ว");
+    setNotice("ล้างข้อความปรับนิสัยเรียบร้อย");
   }, []);
 
   // Restore a previous version into the draft; user reviews then Saves,
@@ -209,7 +209,7 @@ export function useCustomInstructions() {
   const restoreCustomInstructions = useCallback((instructions: string) => {
     revision.current += 1;
     setValue(bounded(instructions));
-    setNotice("โหลดเวอร์ชันก่อนหน้าแล้ว · กด Save เพื่อใช้");
+    setNotice("ดึงอันเก่ามาให้แล้วนะ อย่าลืมกด เซฟเลย เพื่อใช้งานล่ะ");
   }, []);
 
   return {

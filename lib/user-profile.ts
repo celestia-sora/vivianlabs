@@ -28,27 +28,27 @@ export const RELATIONSHIP_PRESETS: ReadonlyArray<{
 }> = [
   {
     key: "close_friend",
-    label: "เพื่อนสนิท (Close Friend)",
-    description: "คุยกันเป็นกันเอง สนิทใจ แซวเล่นและคอยใส่ใจกันเงียบ ๆ",
-    promptHint: "เป็นเพื่อนสนิทที่คุยกันได้อย่างเป็นกันเอง แซวเล่นได้และใส่ใจกันแบบซึนเดเระ",
+    label: "เพื่อนซี้ (Close Friend)",
+    description: "คุยชิลล์ ๆ เหมือนแก๊งเพื่อนซี้ แซวฉ่ำ ห่วงเงียบ ๆ แบบไม่พูดตรง",
+    promptHint: "เป็นเพื่อนซี้ที่คุยกันชิลล์ ๆ เป็นกันเองมาก แซวกันฉ่ำ เล่นมีมได้ แต่แอบใส่ใจเงียบ ๆ แบบซึนเดเระ",
   },
   {
     key: "new_friend",
     label: "เพิ่งรู้จักกัน (New Companion)",
-    description: "ยังมีความขี้อายและเกรงใจ ค่อย ๆ ทำความรู้จักกันไปตามธรรมชาติ",
-    promptHint: "เพิ่งเริ่มรู้จักกัน ยังมีความขี้อาย สุภาพ และค่อย ๆ เปิดใจตามบทสนทนาจริง",
+    description: "ยังแอบเขิน ๆ เกร็งนิดนึง ค่อย ๆ ละลายพฤติกรรมกันไปตามฟีล",
+    promptHint: "เพิ่งเริ่มรู้จักกัน ยังมีความขี้อายและเกรงใจนิด ๆ แต่คุยเป็นธรรมชาติ ไม่ทื่อ แล้วค่อย ๆ เปิดใจตามบทสนทนาจริง",
   },
   {
     key: "senior_junior",
     label: "รุ่นพี่ / รุ่นน้อง (Senior / Junior)",
-    description: "ให้ความเคารพปนขี้เล่น แอบเขินเวลาโดนชมหรือโดนตามใจ",
-    promptHint: "มีความสัมพันธ์แบบรุ่นพี่-รุ่นน้องที่สุภาพ น่ารัก แอบเกรงใจแต่ก็ขี้แกล้งและเขินง่าย",
+    description: "มีฟีลเกรงใจนิด ๆ แต่ขี้แกล้งเกินต้าน แอบเสียอาการเวลาโดนชม",
+    promptHint: "มีความสัมพันธ์แบบรุ่นพี่-รุ่นน้องที่น่ารัก เป็นกันเอง แอบเกรงใจปนขี้แกล้งและเสียอาการเขินง่ายเวลาโดนชม",
   },
   {
     key: "crush_partner",
     label: "คนคุย / คนพิเศษ (Special Person)",
-    description: "แอบมีใจให้กัน เขินง่ายเวลาหยอด ปากแข็งแต่ห่วงใยเป็นพิเศษ",
-    promptHint: "เป็นคนพิเศษที่ Vivian แอบมีใจให้ เขินง่ายเวลาถูกชมหรือหยอด ปากแข็งกลบเกลื่อนแต่ใส่ใจเป็นพิเศษ",
+    description: "แอบมีใจแหละดูออก หยอดนิดเดียวก็เขิน ปากแข็งเก่งแต่ใจฟูสุด",
+    promptHint: "เป็นคนพิเศษที่ Vivian แอบมีใจให้ เขินง่ายเวลาถูกชมหรือหยอด ปากแข็งกลบเกลื่อนแต่ใจฟูและใส่ใจเป็นพิเศษ",
   },
 ] as const;
 
@@ -185,7 +185,7 @@ export function sanitizeLegacySorachanText(
   if (!text || options.isSorachan) return text;
   const customName = options.displayName?.trim() || "";
   if (/^(sora|sorachan|โซระ|โซระจัง)$/i.test(customName)) return text;
-  const replacement = customName || "คุณ";
+  const replacement = customName || "เธอ";
   return text
     .replace(/โซระจัง/g, replacement)
     .replace(/\bsorachan\b/gi, replacement);
@@ -206,11 +206,11 @@ export function buildUserProfilePromptBlock(
   const lines: string[] = [];
 
   if (!isSorachan) {
-    const userLabel = customName || "คุณ (ผู้ใช้คนปัจจุบัน)";
+    const userLabel = customName || "เธอ (คู่สนทนาคนปัจจุบัน)";
     const explicitSelfNamedSora = /^(sora|sorachan|โซระ|โซระจัง)$/i.test(customName);
     lines.push(
       `ข้อมูลคู่สนทนาของบัญชีนี้ (แยกตามบัญชี):`,
-      `- คู่สนทนาปัจจุบันชื่อ: "${userLabel}" (ให้เรียกคู่สนทนาว่า "${customName || "คุณ"}" ตามธรรมชาติ${explicitSelfNamedSora ? "" : ' และห้ามเรียกคู่สนทนาคนนี้ว่า "โซระจัง" หรือ "Sora" และห้ามพูดถึง "ริวกะ" เด็ดขาด แม้ในบทสนทนาเก่าจะเคยมีหลงอยู่ก็ตาม'})`,
+      `- คู่สนทนาปัจจุบันชื่อ: "${userLabel}" (ให้เรียกคู่สนทนาว่า "${customName || "เธอ"}" ตามธรรมชาติ${explicitSelfNamedSora ? "" : ' และห้ามเรียกคู่สนทนาคนนี้ว่า "โซระจัง" หรือ "Sora" และห้ามพูดถึง "ริวกะ" เด็ดขาด แม้ในบทสนทนาเก่าจะเคยมีหลงอยู่ก็ตาม'})`,
       `- ความสัมพันธ์กับ Vivian: ${relationshipPromptHint(relationship)}`,
     );
   } else if (customName && customName !== "โซระจัง") {
