@@ -24,23 +24,23 @@ Vivian is a character-first shy, polite, slightly awkward tsundere companion, no
 
 ## 📋 Project Context
 
-**Project:** Vivian AI Companion  
-**Stack:** Next.js 16.3.3 + React 19 + TypeScript + Tailwind CSS v4  
-**Architecture:** Shared Vivian backend/AI systems with separate Web, Desktop, iOS, and Android clients; sign-in delegated to vivianAuth (Cloudflare Workers + D1)  
-**Database:** Supabase PostgreSQL for app data only (memory, chat history, scenes, voice prefs); sign-in identities live in vivianAuth D1  
-**Deployment:** Vercel for Web (`vivianlabs.vercel.app`); native mobile build/distribution is branch-specific  
+- **Project:** Vivian AI Companion
+- **Stack:** Next.js 16.3.3 + React 19 + TypeScript + Tailwind CSS v4
+- **Architecture:** Shared Vivian backend/AI systems with separate Web, Desktop, iOS, and Android clients; sign-in delegated to vivianAuth (Cloudflare Workers + D1)
+- **Database:** Supabase PostgreSQL for app data only (tiers, quotas, tier requests, user profiles, memory, chat history, scenes, voice/model prefs, custom instructions); sign-in identities live in vivianAuth D1
+- **Deployment:** Vercel for Web (`vivianlabs.vercel.app`); native mobile build/distribution lives in dedicated client repositories (`vivianios`, `vivianapp`)
 
 ### Active platform branches
 - `main` — Vivian Web App / production source of truth
 - `feature/desktop-pet-local` — Vivian Desktop Pet
-- `feature/native-ios` — Native iOS client
-- `feature/native-android` — Native Android client
+- `feature/native-ios` — Legacy branch (active iOS repo: `celestia-sora/vivianios`)
+- `feature/native-android` — Legacy branch (active Android repo: `celestia-sora/vivianapp`)
 
 ### Native mobile rules
 - iOS and Android must reuse Vivian's existing backend, AI, memory, chat, voice, and account contracts where practical.
 - Do not turn either native app into a WebView wrapper of the website.
-- Keep platform-specific UI and OS integrations inside their respective native branches.
-- Preserve one shared Vivian identity and cloud memory across Web, Desktop, iOS, and Android.
+- Keep platform-specific UI and OS integrations inside their respective native repositories/branches.
+- Preserve Vivian's core character persona across Web, Desktop, iOS, and Android while isolating cloud memory/history/preferences per authenticated `user_id` (`user.id`) and enforcing account tiers.
 - Never duplicate or expose provider API keys in native client code.
 
 ### Store release targets
@@ -67,7 +67,7 @@ Vivian is a character-first shy, polite, slightly awkward tsundere companion, no
 - Never embed OpenRouter, Gemini, ElevenLabs, Fish Audio, Supabase service-role, or any other privileged provider secret in iOS or Android binaries.
 - Native clients call Vivian's secured backend over HTTPS; provider credentials remain server-side.
 - Store metadata, screenshots, age/content ratings, privacy disclosures, and permission descriptions must be reviewed before submission.
-- Keep Vivian memory identity shared across Web, Desktop, iOS, and Android unless a platform-specific privacy constraint requires otherwise.
+- Keep Vivian's persona rules consistent across Web, Desktop, iOS, and Android, with per-account `user_id` data isolation and tier quotas enforced server-side.
 - Test voice, camera/vision, notifications, auth, memory sync, account deletion, and degraded-network behavior before every store release.
 
 ---
@@ -93,15 +93,22 @@ import { Container } from "pixi-live2d-display";
 ### API Routes
 
 #### `/api/chat` — LLM Proxy
-- **Input:** `{ messages: ChatMessage[], userId?: string, mode?: "greeting" }` (conversation/message IDs accepted for cloud history)
+- **Input:** `{ messages: ChatMessage[], userId?: string, mode?: "chat" }` (conversation/message IDs accepted for cloud history; server always enforces daily chat quota regardless of client `body.mode`, refunding on LLM failure)
 - **Behavior:**
+  - Enforces daily chat quota in `Asia/Bangkok` (`UTC+7`): `free` = 5/day, `selected` = 20/day, `sorachan` = unlimited (`403 QUOTA_EXCEEDED` when exhausted)
   - Text chat: Try Groq first (`GROQ_MODEL`, default `qwen/qwen3.8-27b`), fall back to Gemini when configured (`GEMINI_MODEL`, default `gemini-2.5-flash`)
   - Vision: Groq Qwen 3.8 27B only (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`). No Gemini fallback — a failed vision request errors instead of silently switching providers.
   - Detect search intents ("search", "news", "latest", etc.) → use Gemini + google_search tool
-- **Output:** `{ content: string, sources?: { title, url }[] }`
+- **Output:** `{ text: string, scene, companion, memories, chatQuota, ... }` (plus optional NDJSON streaming events)
 - **Side Effects:**
-  - Logs to Supabase `conversations` + `messages` tables
-  - May extract memories and save to Supabase `memories` table
+  - Logs to Supabase `conversations` + `messages` tables scoped by `user_key = user.id`
+  - May extract memories and save to Supabase `memories` table scoped by `user_key = user.id`
+
+#### `/api/account`, `/api/tier-requests`, `/api/tier-requests/review`, `/api/admin/tier-requests`
+- **`/api/account` (`GET`):** Returns verified `{ user: { id, email }, tier, isSorachan, userProfile, capabilities, chatQuota, storage, selectedRequest, mailtoUrl, requestEmail }`; automatically claims legacy `"default"`/`"global"` rows once for `suphloeksangko@gmail.com`.
+- **`/api/tier-requests` (`GET`, `POST`):** Allows `free` users to submit/check Selected tier requests, sends notification email to `viviannextlabs@gmail.com` via Resend when configured + returns `mailto:` fallback (never exposes `approveUrl`/`rejectUrl` in client JSON).
+- **`/api/tier-requests/review` (`GET`, `POST`):** `GET` renders an HTML confirmation form without mutating DB (safe against link scanners); `POST` verifies HMAC token and approves/rejects atomically.
+- **`/api/admin/tier-requests` (`GET`, `POST`):** `sorachan` emails only (`403 ADMIN_REQUIRED` otherwise); lists requests/accounts, approves/rejects requests, and sets non-Sorachan user tiers (`free` / `selected`).
 
 #### `/api/memory` — Memory CRUD
 - **GET:** Fetch all memories + last 100 messages
@@ -133,6 +140,8 @@ import { Container } from "pixi-live2d-display";
 - `ELEVENLABS_VOICE_ID` — Text-to-Speech voice selection
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — Memory/history/scene persistence (app data only, not auth)
 - `TYPESAFE_API_KEY` (alias `JEV_API_KEY`) — JEV decision layer
+- `RESEND_API_KEY`, `RESEND_FROM`, `NEXT_PUBLIC_APP_URL` — Selected tier request email notifications to `viviannextlabs@gmail.com` (optional; `mailto:` fallback and Sorachan Admin panel work without them)
+- `TIER_ACTION_SECRET`, `SCENE_IMAGE_TOKEN_SECRET` — Optional HMAC secrets for tier review and signed scene image tokens (fall back cleanly when unset)
 - `DEV_BYPASS_LOGIN` — Local preview only (`true` + `NODE_ENV=development`); never honored in production
 
 ---
@@ -304,7 +313,10 @@ model.setExpression(null);
 | `app/api/chat/route.ts` | LLM routing logic | High |
 | `app/layout.tsx` | Root layout (Cubism Core loader) | Low |
 | `app/globals.css` | Styling | Medium |
-| `lib/auth/` | Bearer verify bridge (`getAuthAccess` → vivianAuth `/api/verify`) + client `authFetch` | Medium |
+| `lib/auth/` | Bearer verify bridge (`getAuthAccess` / `requireAuthorizedUser` → vivianAuth `/api/verify`) + client `authFetch` | Medium |
+| `lib/user-tiers.ts` | 3-tier capabilities, Bangkok daily quota RPCs, legacy claim, per-user storage helpers | Medium |
+| `lib/tier-requests.ts` | Selected tier request storage, HMAC review tokens, Resend + `mailto:` notifications | Medium |
+| `app/components/tier-panel.tsx` | Tier badges, quota display, Request Selected / Limit Reached modals, Sorachan Admin panel | Medium |
 | `lib/supabase-admin.ts` | Database client | Low |
 | `public/live2d/` | Live2D assets | Low |
 | `package.json` | Dependencies | Low |
@@ -385,9 +397,9 @@ This section is the current source of truth for continuing work. Read it before 
 
 - Never print, commit, or place API keys in this file, Notion, Trello, client code, or `NEXT_PUBLIC_*` variables.
 - Provider secrets belong only in Vercel environment variables. vivianAuth secrets (Google, Resend, `VIVIAN_INTERNAL_TOKEN`) belong only in Cloudflare Workers secrets.
-- Web access requires one of the two invited, verified D1 identities (`suphloeksangko@gmail.com`, `duckchan690@gmail.com`) via vivianAuth `POST /api/verify`: bearer token + `X-Internal-Token` shared with vivianAuth. The user must be non-anonymous and have a confirmed email (`isAllowedUser`). Guard every API with `requireApiAccess` in `lib/auth/server.ts`. Never trust client-supplied identity or `user_metadata` for authorization.
-- Sign-in flow: vivianAuth → `#token=` fragment → `localStorage vivian_auth_token` → `Authorization: Bearer` (`authFetch`) → server verify. Logout revokes via vivianAuth `POST /api/logout`. `app/page.tsx` is a shell; `app/companion.tsx` gates client-side; `app/login/page.tsx` is the hop shim. Legacy Supabase Auth config is unused for login (only Realtime config reads `NEXT_PUBLIC_SUPABASE_*`).
-- All confirmed D1 accounts retain the existing shared `default` memory/relationship identity. Scene/storage rows store D1 UUIDs in plain `user_id` columns (FKs to `auth.users` dropped by `20261107120000_drop_auth_fk.sql`; RLS + `eq("user_id",…)` scoping unchanged). Do not widen access, separate user data, add a home server, Python backend, self-hosted LLM, or GPU infrastructure unless explicitly requested.
+- Web access requires a confirmed, non-anonymous D1 identity verified via vivianAuth `POST /api/verify` (bearer token + `X-Internal-Token` shared with vivianAuth). `isAllowedUser` accepts any confirmed, non-anonymous user with a valid email. Guard every protected API with `requireAuthorizedUser` / `requireApiAccess` in `lib/auth/server.ts`. Never trust client-supplied identity or `user_metadata` for authorization.
+- Sign-in flow: vivianAuth → `#token=` fragment → `localStorage vivian_auth_token` → `Authorization: Bearer` (`authFetch`) → server verify. `authFetch` preserves the token and returns the response normally for non-auth 403 error codes (`QUOTA_EXCEEDED`, `TIER_REQUIRED`, `STORAGE_QUOTA_EXCEEDED`, `ADMIN_REQUIRED`), clearing/redirecting to `/access-denied` only on `ACCESS_DENIED` or non-tier 403s. Logout revokes via vivianAuth `POST /api/logout`. `app/page.tsx` is a shell; `app/companion.tsx` gates client-side and hydrates account/tier state from `/api/account`; `app/login/page.tsx` is the hop shim. Legacy Supabase Auth config is unused for login (only Realtime config reads `NEXT_PUBLIC_SUPABASE_*`).
+- User tiers and isolation: `suphloeksangko@gmail.com` and `duckchan690@gmail.com` resolve to `sorachan` (unlimited chats, shared + global R2, Admin management). All other confirmed accounts start on `free` (5 chats/day, no R2 cloud, no shared models) and can request `selected` (20 chats/day, private R2 cloud up to `536,870,912` bytes / 512 MiB, no shared models) via `viviannextlabs@gmail.com`. All user data (`conversations`, `messages`, `memories`, `companion_state`, `memory_consolidation_runs`, `vivian_voice_preferences`, `vivian_model_preferences`, `vivian_user_custom_instructions`, `vivian_scenes`, `vivian_storage_objects`, `vivian_user_profiles`) is strictly isolated per `user.id` (even between the two Sorachan accounts); legacy `"default"`/`"global"` data was claimed exclusively by `suphloeksangko@gmail.com` via `vivian_claim_legacy_data`. Do not expose shared models to `free`/`selected`, add a home server, Python backend, self-hosted LLM, or GPU infrastructure unless explicitly requested.
 - TTS and Live2D failures must never prevent text chat from completing.
 - Text chat uses Groq first, then Gemini as fallback; vision uses Groq Qwen 3.8 27B only (no Gemini fallback); search uses Gemini + `google_search`. STT (`/api/stt`) honors the selected UI language; TTS uses ElevenLabs `eleven_v4` Text to Dialogue.
 
@@ -462,8 +474,8 @@ This section supersedes older fresh-only JEV and preflight descriptions above. R
 
 ## Cloud chat history — 2026-10-06
 
-- `conversations`/`messages` now back the browser conversation list through authenticated `/api/conversations` GET/PUT. Both allowed accounts retain the existing shared `default` identity. Cloud writes are append-only by stable client message UUID; never replace an entire transcript from one device.
-- Apply `20261006005533_cloud_conversation_history.sql` before deployment. Tables and `vivian_save_conversation` RPC are service-only, with RLS enabled. Local history migrates with cached stable UUIDs and remains a retry cache during outages.
+- `conversations`/`messages` now back the browser conversation list through authenticated `/api/conversations` GET/PUT. Since `20261202000000_user_tiers_and_isolation.sql`, all conversations, memories, companion state, and voice/model preferences are isolated per authenticated `user.id` (`user_key = user.id`), replacing the legacy `'default'`/`'global'` singleton (claimed once by `suphloeksangko@gmail.com`). Cloud writes are append-only by stable client message UUID; never replace an entire transcript from one device.
+- Apply `20261006005533_cloud_conversation_history.sql` and `20261202000000_user_tiers_and_isolation.sql` before deployment. Tables, `vivian_save_conversation` RPC (accepts `p_user_key`), and tier RPCs are service-only, with RLS enabled. Local history migrates with cached stable UUIDs and remains a retry cache during outages.
 - `/api/chat` accepts optional conversation/message IDs and saves the active user/reply pair before returning, independently of TTS. Legacy clients retain the original request contract. Passive greetings remain ephemeral. Reset must pause and drain pending history writes before deleting cloud data.
 - Verify with `npm run test:history`, `npm run test:history:integration` and `npm run test:history:postgres` (disposable local Postgres container only). No regression test may use live chat history.
 
@@ -476,7 +488,8 @@ This section supersedes older fresh-only JEV and preflight descriptions above. R
 
 ## Release 2.6.0 — 2026-11-23
 
-- User accounts, tiers (`Free` / `Selected` / `Sorachan`), per-account isolation, onboarding/partner profiles (`/api/user-profile`), and Selected tier requests (`/api/tier-requests`, `/api/admin/tier-requests`).
+- User accounts, tiers (`Free` / `Selected` / `Sorachan`, daily Bangkok-midnight quotas of 5 / 20 / unlimited), per-account isolation (`20261202000000_user_tiers_and_isolation.sql`, `vivian_claim_legacy_data`), onboarding/partner profiles (`/api/user-profile`), and Selected tier requests (`/api/tier-requests`, `/api/tier-requests/review`, `/api/admin/tier-requests`).
+- Scene image security: `/api/scenes/[id]/image` requires Bearer auth or a signed short-lived HMAC `?token=` bound to `(sceneId, userId, exp)` with live tier & ownership checks; unauthenticated `getSceneImagePublic` bypass is removed.
 - Kinetic Center Build: ElevenLabs `eleven_v4` streaming TTS with `audio_alignment` timestamps (`/api/tts/stream`) + Scribe v2 Realtime STT (`/api/stt/token`) synced via `components/KineticText.tsx`.
 - Full friendly Gen Z Thai UI copy rewrite across panels/modals/errors, reduced technical jargon, and smoother human-like Gen Z persona tuning in `lib/vivian-persona.ts`, `lib/vivian-story.ts`, and `app/api/chat/route.ts`.
 - Version: vivian 2.6.0.

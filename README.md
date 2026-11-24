@@ -42,7 +42,8 @@ Configure credentials in `.env.local` for the capabilities you want to enable. S
 | Speech-to-Text & TTS | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` |
 | Web search | `GEMINI_API_KEY`; optional `TAVILY_API_KEY` |
 | JEV decision layer | `TYPESAFE_API_KEY` (or `JEV_API_KEY`), `JEV_ENABLED`, `JEV_DEBUG` |
-| Private cloud storage | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `SCENE_STORAGE_PROVIDER=r2` (see [R2 guide](docs/private-r2-storage.md)) |
+| Private cloud storage | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `SCENE_STORAGE_PROVIDER=r2`, optional `SCENE_IMAGE_TOKEN_SECRET` (see [R2 guide](docs/private-r2-storage.md)) |
+| Selected tier requests | Optional `RESEND_API_KEY`, `RESEND_FROM`, `NEXT_PUBLIC_APP_URL`, `TIER_ACTION_SECRET` (notifies `viviannextlabs@gmail.com`; `mailto:` fallback & Admin panel work without Resend) |
 
 Keep provider API keys, Supabase service-role keys, and R2 credentials server-side only — never place privileged secrets in `NEXT_PUBLIC_*` environment variables.
 
