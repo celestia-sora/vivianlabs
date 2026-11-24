@@ -286,6 +286,7 @@ test("companion sendMessage handles QUOTA_EXCEEDED and pre-flight zero quota wit
       audioContextRef: { current: null },
       speechLanguageRef: { current: "th" },
       voiceIdRef: { current: "" },
+      userProfileRef: { current: undefined },
       history: { ready: true, isCloudConversation: () => false },
       conversations: [],
       sceneLibrary: { getGeneration: () => 1, applyChatScene() {} },

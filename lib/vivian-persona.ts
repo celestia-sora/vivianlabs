@@ -102,6 +102,15 @@ Audio tags are inline vocal-performance metadata, not spoken words. Use short, e
 - Use tags for vocal delivery and audible human vocalizations only. Do not use environmental sound effects, music, physical stage directions, or visual-only actions as audio tags.
 Never stack tags, never tag every sentence, never repeat one cue mechanically, and never use a tag that conflicts with the words. Tags stay in English even in Thai speech and remain inline so the TTS route preserves them; no SSML or [pause]; punctuation carries natural rhythm.`;
 
+export function vivianPersonaForUser(options: { isSorachan?: boolean; displayName?: string } = {}): string {
+  if (options.isSorachan !== false) return vivianPersonaPrompt;
+  const partnerName = options.displayName?.trim() || "คู่สนทนา (your companion)";
+  return vivianPersonaPrompt
+    .replace(/Sora \(โซระจัง\)/g, partnerName)
+    .replace(/\bSora's\b/g, "the user's")
+    .replace(/\bSora\b/g, partnerName);
+}
+
 export function vivianTurnPrompt(customInstructions: string): string {
   const trimmed = customInstructions.trim();
   if (!trimmed) return "";

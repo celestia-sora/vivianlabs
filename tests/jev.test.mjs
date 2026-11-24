@@ -252,6 +252,7 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/vivian-story": story,
     "@/lib/vivian-dialogue": dialogue,
     "@/lib/vivian-persona": persona,
+    "@/lib/user-profile": load("../lib/user-profile.ts"),
     "@/lib/custom-instructions": customInstructions,
     "@/lib/speech": load("../lib/speech.ts"),
     "@/lib/memory-recall": recall,
@@ -259,6 +260,10 @@ function chatFixture({ values, jevFetch, env = {}, denied = null, groqReply, gem
     "@/lib/companion-store": { loadCompanionState: async () => { calls.push({ kind: "state" }); return companion.defaultCompanionState(); }, saveCompanionState: () => assert.fail("Background writes must not run in fixtures") },
     "@/lib/supabase-admin": { getSupabaseAdmin() {
       return { from(table) {
+        if (table === "vivian_user_custom_instructions" || table === "vivian_user_profiles") {
+          const q = { select() { return q; }, eq() { return q; }, maybeSingle() { return Promise.resolve({ data: null, error: null }); } };
+          return q;
+        }
         assert.equal(table, "memories"); memoryLoads.push(table);
         const query = { select() { return query; }, eq() { return query; }, order() { return query; }, update() { return query; }, in() { return Promise.resolve({ data: null, error: null }); }, upsert() { return Promise.resolve({ data: null, error: null }); }, limit() { return Promise.resolve({ data: [{ id: 1, memory: "Likes tea", category: "preference", importance: 3 }] }); } };
         return query;

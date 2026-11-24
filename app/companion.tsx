@@ -37,6 +37,8 @@ import { createModelResources, importModelFiles, loadModelCatalog, hydrateModelP
 import { CloudModelError, getCloudModels, cloudModelPlaceholder, isCloudLibraryAllowed, uploadCloudModel, downloadCloudModel, deleteCloudModel, saveCloudModelPreference, saveCloudModelExpressions, type CloudLibrary } from "@/lib/cloud-models";
 import { useVoicePreferences } from "@/lib/use-voice-preferences";
 import { useCustomInstructions } from "@/lib/use-custom-instructions";
+import { useUserProfile } from "@/lib/use-user-profile";
+import { UserOnboardingModal, UserProfileSettingsCard } from "@/app/components/user-onboarding-modal";
 import type { SpeechLanguage } from "@/lib/voice-preferences";
 import { useSceneLibrary } from "@/lib/use-scene-library";
 import { SceneManager } from "@/app/components/scene-manager";
@@ -476,6 +478,17 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     clearCustomInstructions,
     restoreCustomInstructions,
   } = useCustomInstructions();
+  const {
+    userProfile,
+    savingUserProfile,
+    userProfileNotice,
+    onboardingOpen,
+    setOnboardingOpen,
+    saveUserProfile,
+    dismissOnboarding,
+  } = useUserProfile(accountId);
+  const userProfileRef = useRef(userProfile);
+  userProfileRef.current = userProfile;
   const [editingMemoryId, setEditingMemoryId] = useState<number | null>(null);
   const [memoryDraft, setMemoryDraft] = useState("");
   const [backgroundMode, setBackgroundMode] = useState<keyof typeof BACKGROUNDS>("day");
@@ -2113,6 +2126,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           streamAudio: shouldStreamAudio,
           voiceId: voiceIdRef.current,
           turnId,
+          userProfile: typeof userProfileRef !== "undefined" ? userProfileRef.current : undefined,
         }),
       });
       const streamPromise = readChatResponse<ChatPayload>(
@@ -3238,6 +3252,12 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
              {panel === "status" && <StorageStatusPanel account={account} onRequestSelected={() => setRequestModalOpen(true)}/>}
               {panel === "settings" && <>
                 <TierSettingsCard account={account} accountEmail={accountEmail} accountId={accountId} loading={accountLoading} onOpenRequest={() => setRequestModalOpen(true)} />
+                <UserProfileSettingsCard
+                  profile={userProfile}
+                  saving={savingUserProfile}
+                  notice={userProfileNotice}
+                  onOpenModal={() => setOnboardingOpen(true)}
+                />
                 {account?.tier === "sorachan" && account?.capabilities?.isAdmin && (
                   <SorachanAdminPanel onAccountChanged={() => { void refreshAccount(); }} />
                 )}
@@ -3250,6 +3270,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     </div>
     {languageOpen && <div className="chat-backdrop" role="presentation" onClick={() => setLanguageOpen(false)}><section className="info-sheet language-sheet" role="dialog" aria-modal="true" aria-label="ล็อกภาษาการพูด" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>LANGUAGE LOCK</small><h1>ภาษาการพูด</h1><p>ใช้ภาษาเดียวกันทั้งฟังเสียงและตอบด้วยเสียง</p></div><button type="button" onClick={() => setLanguageOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="language-options">{LANGUAGE_OPTIONS.map((option) => <button key={option.code} type="button" className={speechLanguage === option.code ? "is-selected" : ""} onClick={() => { saveLanguage(option.code); setLanguageOpen(false); }}><strong>{option.nativeName}</strong><span>{option.label} · {option.code.toUpperCase()}</span></button>)}</div></section></div>}
     {infoOpen && <div className="chat-backdrop" role="presentation" onClick={() => setInfoOpen(false)}><section className="info-sheet" role="dialog" aria-modal="true" aria-label="ข้อมูลเวอร์ชัน" onClick={(event) => event.stopPropagation()}><div className="memory-sheet-head"><div><small>VIVIAN INFO</small><h1>ข้อมูลเวอร์ชัน</h1><p>ข้อมูลของ companion เวอร์ชันที่กำลังใช้งาน</p></div><button type="button" onClick={() => setInfoOpen(false)} aria-label="ปิด"><Icon name="close"/></button></div><div className="info-list"><p><strong>App</strong>Vivian AI Companion</p><p><strong>Codename</strong>{APP_CODENAME}</p><p><strong>Version</strong>vivian 2.5.1</p><p><strong>Character</strong>Nothing</p></div></section></div>}
+    <UserOnboardingModal
+      open={onboardingOpen}
+      profile={userProfile}
+      saving={savingUserProfile}
+      onSave={saveUserProfile}
+      onSkip={dismissOnboarding}
+    />
     <RequestSelectedModal
       open={requestModalOpen}
       account={account}
