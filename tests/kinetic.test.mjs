@@ -118,20 +118,34 @@ import { TtsAlignmentTracker, parseAlignmentEvent } from "../lib/kinetic/tts-ali
 import { TimestampedTtsSession } from "../lib/timestamped-tts-session.ts";
 import { parseTimestampLines } from "../lib/elevenlabs-timestamps.ts";
 
-test("tracker rebuilds a word split across stream messages with stable ids", () => {
-  const t = new TtsAlignmentTracker("en");
-  const mk = (text, at) => parseAlignmentEvent({
-    turnId: "t", sentence: 0, chars: [...text],
+test("tracker withholds trailing partial word until boundary/sentence-end and preserves spacing", () => {
+  const t = new TtsAlignmentTracker("th");
+  const mk = (sentence, text, at) => parseAlignmentEvent({
+    turnId: "t", sentence, chars: [...text],
     starts: [...text].map((_, i) => at + i * 0.1), ends: [...text].map((_, i) => at + (i + 1) * 0.1),
   });
-  const first = t.ingest(mk("Hel", 0));
-  assert.deepEqual(first.map((w) => w.text), ["Hel"]);
-  const second = t.ingest(mk("lo wor", 0.3));
-  assert.deepEqual(second.map((w) => [w.id, w.text]), [["s0-0", "Hello"], ["s0-1", "wor"]]);
+  // First chunk ends mid-word ("โ" of "โอเค") -> not emitted prematurely
+  assert.deepEqual(t.ingest(mk(0, "เดี๋ยวนะ โ", 0)).map((w) => [w.text, w.spaceBefore]), [
+    ["เดี๋ยว", false],
+    ["นะ", false],
+  ]);
+  // Rest of word arrives + sentence finishes -> "โอเค" emitted whole with spaceBefore: true
+  t.ingest(mk(0, "อเค", 1.0));
+  const done = t.markSentenceEnd(0);
+  assert.deepEqual(done.map((w) => [w.id, w.text, w.spaceBefore]), [
+    ["s0-0", "เดี๋ยว", false],
+    ["s0-1", "นะ", false],
+    ["s0-2", "โอเค", true],
+  ]);
   const ctl = new TtsSyncController();
   ctl.startTurn("t");
-  ctl.addWords("t", first); ctl.addWords("t", second);
-  assert.deepEqual(ctl.frame(0.1).map((w) => w.text), ["Hello"]);
+  ctl.addWords("t", done);
+  assert.deepEqual(ctl.frame(0.1).map((w) => w.text), ["เดี๋ยว"]);
+  assert.deepEqual(ctl.frame(1.1).map((w) => [w.text, w.spaceBefore]), [
+    ["เดี๋ยว", false],
+    ["นะ", false],
+    ["โอเค", true],
+  ]);
 });
 
 test("parseTimestampLines handles split JSON lines", () => {

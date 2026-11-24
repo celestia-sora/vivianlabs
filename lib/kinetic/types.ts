@@ -4,6 +4,7 @@ export interface KineticWord {
   id: string;
   text: string;
   state: KineticWordState;
+  spaceBefore?: boolean;
 }
 
 export const KINETIC_WINDOW = 10;
@@ -36,7 +37,7 @@ function sameWords(a: readonly KineticWord[], b: readonly KineticWord[]): boolea
   if (a === b) return true;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
-    if (a[i].id !== b[i].id || a[i].text !== b[i].text || a[i].state !== b[i].state) return false;
+    if (a[i].id !== b[i].id || a[i].text !== b[i].text || a[i].state !== b[i].state || Boolean(a[i].spaceBefore) !== Boolean(b[i].spaceBefore)) return false;
   }
   return true;
 }

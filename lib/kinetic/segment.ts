@@ -3,7 +3,9 @@
  *
  * Thai does not separate words with spaces, so we rely on `Intl.Segmenter`
  * and fall back to whitespace splitting when it is unavailable. Punctuation is
- * attached to the preceding word so it never animates as a word of its own.
+ * attached to the preceding word so it never animates as a word of its own,
+ * and `spaceBefore` preserves whether real whitespace separated two words so
+ * Thai phrases stay tight while English/mixed spacing stays natural.
  */
 
 export interface TimedChar {
@@ -17,6 +19,12 @@ export interface WordTiming {
   text: string;
   startSec: number;
   endSec: number;
+  spaceBefore?: boolean;
+}
+
+export interface SegmentedToken {
+  text: string;
+  spaceBefore: boolean;
 }
 
 const HAS_THAI = /[ก-๙]/u;
@@ -75,6 +83,21 @@ export function segmentSpans(text: string, language = "th"): Span[] {
   return spans;
 }
 
+function hadSpaceBefore(text: string, span: Span, prev: Span | undefined): boolean {
+  if (!prev) return false;
+  return /\s/u.test(text.slice(prev.end, span.start));
+}
+
+/** Plain-text tokens with source spacing metadata (audio tags stripped). */
+export function segmentTokens(text: string, language = "th"): SegmentedToken[] {
+  const clean = stripAudioTags(text);
+  const spans = segmentSpans(clean, language);
+  return spans.map((s, i) => ({
+    text: clean.slice(s.start, s.end),
+    spaceBefore: hadSpaceBefore(clean, s, spans[i - 1]),
+  }));
+}
+
 /** Plain-text word list (no timing). Audio tags are ignored. */
 export function segmentText(text: string, language = "th"): string[] {
   const clean = stripAudioTags(text);
@@ -87,7 +110,6 @@ export function segmentText(text: string, language = "th"): string[] {
  * is needed. Bracketed audio tags are dropped.
  */
 export function wordsFromTimedChars(chars: readonly TimedChar[], language = "th", idPrefix = "w", firstIndex = 0): WordTiming[] {
-  // Remove audio tags while keeping a UTF-16 unit → char index map.
   let text = "";
   const unitToChar: number[] = [];
   let depth = 0;
@@ -98,8 +120,10 @@ export function wordsFromTimedChars(chars: readonly TimedChar[], language = "th"
     if (depth > 0) continue;
     for (let u = 0; u < ch.length; u += 1) { text += ch[u]; unitToChar.push(i); }
   }
+  const spans = segmentSpans(text, language);
   const words: WordTiming[] = [];
-  for (const span of segmentSpans(text, language)) {
+  for (let i = 0; i < spans.length; i += 1) {
+    const span = spans[i];
     const first = chars[unitToChar[span.start]];
     const last = chars[unitToChar[span.end - 1]];
     if (!first || !last) continue;
@@ -108,6 +132,7 @@ export function wordsFromTimedChars(chars: readonly TimedChar[], language = "th"
       text: text.slice(span.start, span.end),
       startSec: first.start,
       endSec: Math.max(first.start, last.end),
+      spaceBefore: hadSpaceBefore(text, span, spans[i - 1]),
     });
   }
   return words;

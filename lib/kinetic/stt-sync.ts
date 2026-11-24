@@ -1,4 +1,4 @@
-import { segmentText } from "./segment.ts";
+import { segmentTokens, type SegmentedToken } from "./segment.ts";
 import { windowWords, type KineticWord } from "./types.ts";
 
 export interface SttTimedWord {
@@ -20,9 +20,9 @@ function norm(text: string): string {
  * corrected or later committed; corrections therefore never duplicate words.
  */
 export class SttSyncController {
-  private committed: string[] = [];
+  private committed: SegmentedToken[] = [];
   private rawCommitted: string[] = [];
-  private partialWords: string[] = [];
+  private partialWords: SegmentedToken[] = [];
   private epoch = 0;
   private language: string;
   private lastCommitKey = "";
@@ -34,7 +34,7 @@ export class SttSyncController {
 
   /** Replaces the uncommitted tail with the latest partial transcript. */
   partial(text: string): void {
-    this.partialWords = segmentText(text, this.language);
+    this.partialWords = segmentTokens(text, this.language);
     this.partialSinceCommit = true;
   }
 
@@ -53,7 +53,9 @@ export class SttSyncController {
     const key = norm(orderedText);
     if (!key) { this.partialWords = []; return false; }
     if (key === this.lastCommitKey && !this.partialSinceCommit) { this.partialWords = []; return false; }
-    this.committed.push(...segmentText(orderedText, this.language));
+    const tokens = segmentTokens(orderedText, this.language);
+    if (this.committed.length > 0 && tokens.length > 0) tokens[0] = { ...tokens[0], spaceBefore: true };
+    this.committed.push(...tokens);
     this.rawCommitted.push(orderedText.trim());
     this.partialWords = [];
     this.lastCommitKey = key;
@@ -77,11 +79,12 @@ export class SttSyncController {
 
   frame(windowSize?: number): KineticWord[] {
     const out: KineticWord[] = [];
-    this.committed.forEach((text, i) => out.push({ id: `w${this.epoch}-${i}`, text, state: "final" }));
+    this.committed.forEach((tok, i) => out.push({ id: `w${this.epoch}-${i}`, text: tok.text, state: "final", spaceBefore: tok.spaceBefore }));
     const base = this.committed.length;
-    this.partialWords.forEach((text, i) => {
+    this.partialWords.forEach((tok, i) => {
       const last = i === this.partialWords.length - 1;
-      out.push({ id: `w${this.epoch}-${base + i}`, text, state: last ? "active" : "incoming" });
+      const spaceBefore = i === 0 && base > 0 ? true : tok.spaceBefore;
+      out.push({ id: `w${this.epoch}-${base + i}`, text: tok.text, state: last ? "active" : "incoming", spaceBefore });
     });
     return windowWords(out, windowSize);
   }

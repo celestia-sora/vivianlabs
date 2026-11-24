@@ -59,7 +59,7 @@ export class TtsSyncController {
     for (let i = 0; i < revealed; i += 1) {
       const w = this.words[i];
       const isLast = i === revealed - 1;
-      out.push({ id: w.id, text: w.text, state: isLast && positionSec < w.endSec + 0.25 ? "active" : "past" });
+      out.push({ id: w.id, text: w.text, state: isLast && positionSec < w.endSec + 0.25 ? "active" : "past", spaceBefore: w.spaceBefore });
     }
     return windowWords(out, windowSize);
   }

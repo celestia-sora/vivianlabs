@@ -2149,13 +2149,20 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           } else if (eventType === "audio_alignment") {
             const alignment = parseAlignmentEvent(event);
             if (alignment && streamer.acceptsTurn(alignment.turnId)) ttsSync.addWords(turnId, ttsTracker.ingest(alignment));
+          } else if (eventType === "audio_alignment_end") {
+            const eventTurnId = String(event.turnId ?? "");
+            if (typeof event.sentence === "number" && streamer.acceptsTurn(eventTurnId)) {
+              ttsSync.addWords(turnId, ttsTracker.markSentenceEnd(event.sentence));
+            }
           } else if (eventType === "audio_reset") {
             streamer.resetAttempt(String(event.turnId ?? ""));
             ttsTracker.reset();
             ttsSync.resetAttempt(turnId);
           } else if (eventType === "audio_turn_end") {
             if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
-            streamer.markTurnComplete(String(event.turnId ?? ""));
+            const eventTurnId = String(event.turnId ?? "");
+            if (streamer.acceptsTurn(eventTurnId)) ttsSync.addWords(turnId, ttsTracker.flushAll());
+            streamer.markTurnComplete(eventTurnId);
             ttsSync.end(turnId);
           } else if (eventType === "audio_error") {
             if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }

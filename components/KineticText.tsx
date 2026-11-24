@@ -6,58 +6,72 @@ import type { KineticStore, KineticWord } from "@/lib/kinetic/types";
 const EASE = "cubic-bezier(.16, 1, .3, 1)";
 const MOVE_MS = 420;
 
+interface Pos { left: number; top: number }
+
 /**
  * Kinetic Center Build — one component for both Vivian (TTS) and the user (STT).
- * New words enter from the right, the centered row slides left (FLIP, transform
- * only), the active word is emphasised and older words fade. Frames arrive via
- * an external store so the parent never re-renders per word.
+ * New words enter from the right, existing words shift smoothly (2D FLIP,
+ * transform only), the active word is emphasised and older words fade gently.
+ * Frames arrive via an external store so the parent never re-renders per word.
  */
 export function KineticText({ store, variant, label }: { store: KineticStore; variant: "vivian" | "user"; label?: string }) {
   const words = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const rowRef = useRef<HTMLSpanElement>(null);
-  const lefts = useRef(new Map<string, number>());
+  const positions = useRef(new Map<string, Pos>());
   const anims = useRef(new WeakMap<HTMLElement, Animation>());
 
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!row) return;
     const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const next = new Map<string, number>();
-    const previous = lefts.current;
+    const next = new Map<string, Pos>();
+    const previous = positions.current;
     for (const el of Array.from(row.children) as HTMLElement[]) {
       const id = el.dataset.id ?? "";
       let activeDx = 0;
+      let activeDy = 0;
       const prevAnim = anims.current.get(el);
       if (prevAnim) {
         if (typeof getComputedStyle === "function" && typeof DOMMatrix !== "undefined") {
           const t = getComputedStyle(el).transform;
           if (t && t !== "none") {
-            try { activeDx = new DOMMatrix(t).m41; } catch { activeDx = 0; }
+            try {
+              const m = new DOMMatrix(t);
+              activeDx = m.m41;
+              activeDy = m.m42;
+            } catch {
+              activeDx = 0;
+              activeDy = 0;
+            }
           }
         }
         prevAnim.cancel();
         anims.current.delete(el);
       }
-      const left = el.getBoundingClientRect().left;
-      next.set(id, left);
+      const rect = el.getBoundingClientRect();
+      next.set(id, { left: rect.left, top: rect.top });
       if (reduce || typeof el.animate !== "function") continue;
       const before = previous.get(id);
       if (before === undefined) {
         // Incoming word: enter from the right.
         const anim = el.animate(
-          [{ transform: "translateX(28px) scale(.92)", opacity: 0 }, { transform: "translateX(0) scale(1)", opacity: 1 }],
+          [{ transform: "translate(24px, 0) scale(.94)", opacity: 0 }, { transform: "translate(0, 0) scale(1)", opacity: 1 }],
           { duration: MOVE_MS, easing: EASE },
         );
         anims.current.set(el, anim);
       } else {
-        const delta = before + activeDx - left;
-        if (Math.abs(delta) > 0.5) {
-          const anim = el.animate([{ transform: `translateX(${delta}px)` }, { transform: "translateX(0)" }], { duration: MOVE_MS, easing: EASE });
+        const dx = before.left + activeDx - rect.left;
+        const dy = before.top + activeDy - rect.top;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          const anim = el.animate(
+            [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+            { duration: MOVE_MS, easing: EASE },
+          );
           anims.current.set(el, anim);
         }
       }
     }
-    lefts.current = next;
+    positions.current = next;
   }, [words]);
 
   const count = words.length;
@@ -69,7 +83,7 @@ export function KineticText({ store, variant, label }: { store: KineticStore; va
           <span
             key={word.id}
             data-id={word.id}
-            className={`kinetic-word is-${word.state}`}
+            className={`kinetic-word is-${word.state}${word.spaceBefore ? " has-space" : ""}`}
             style={{ ["--age" as string]: String(count - 1 - index) }}
           >
             {word.text}

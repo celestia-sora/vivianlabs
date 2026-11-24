@@ -28,6 +28,11 @@ export type AudioStreamEvent =
       ends: number[];
     }
   | {
+      event: "audio_alignment_end";
+      turnId: string;
+      sentence: number;
+    }
+  | {
       event: "audio_turn_end";
       turnId: string;
       chunkCount: number;

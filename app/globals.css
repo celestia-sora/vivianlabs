@@ -83,7 +83,7 @@ button { cursor: pointer; }
 .live2d-canvas:active { cursor: grabbing; }
 .companion-brand { position: absolute; z-index: 3; top: max(22px, env(safe-area-inset-top)); left: clamp(24px, 4vw, 58px); display: flex; align-items: center; gap: 10px; color: #241329; font-family: Arial, sans-serif; font-size: clamp(27px, 3.1vw, 40px); letter-spacing: -.07em; font-weight: 500; }
 .brand-mark { display: block; width: 38px; height: 38px; border: 3px solid currentColor; border-right-color: transparent; border-radius: 87% 12% 87% 12%; transform: rotate(-37deg) skew(-10deg); }
-.speech-stack { position: absolute; z-index: 4; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 96px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(78vw, 660px); pointer-events: none; }
+.speech-stack { position: absolute; z-index: 4; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 96px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(90vw, 680px); pointer-events: none; }
 /* Keep speech clear of the text pill while it is unfolded. */
 .companion-stage:has(.composer-pill.is-open) .speech-stack { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 156px); }
 /* Keep speech above the double-tap shortcut row. */
@@ -537,11 +537,12 @@ img.conversation-avatar { display: block; width: 38px; height: 38px; object-fit:
 .kinetic-text { display: flex; flex-direction: column; align-items: center; max-width: 100%; }
 .kinetic-text.is-empty { display: none; }
 .kinetic-label { display: block; margin-bottom: 2px; color: #6b6b8f; font-family: Arial, sans-serif; font-size: 9px; letter-spacing: .13em; text-transform: uppercase; }
-.kinetic-row { display: flex; flex-wrap: nowrap; justify-content: center; align-items: baseline; gap: .1em; max-width: 100%; overflow: hidden; white-space: nowrap; line-height: 1.4; mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 100%); -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 100%); }
+.kinetic-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: .04em; max-width: 100%; line-height: 1.45; }
 .kinetic-vivian { color: #241329; font-size: clamp(16px, 1.7vw, 23px); }
 .kinetic-user { color: #3a2f47; font-size: clamp(14px, 1.35vw, 17px); }
-.kinetic-word { display: inline-block; will-change: transform, opacity; transform-origin: 50% 80%; transition: opacity .45s ease, transform .35s cubic-bezier(.16, 1, .3, 1), color .3s ease; opacity: max(.28, calc(1 - var(--age, 0) * .07)); }
+.kinetic-word { display: inline-block; will-change: transform, opacity; transform-origin: 50% 80%; transition: opacity .45s ease, transform .35s cubic-bezier(.16, 1, .3, 1), color .3s ease; opacity: max(.32, calc(1 - var(--age, 0) * .065)); }
+.kinetic-word.has-space:not(:first-child) { margin-left: .24em; }
 .kinetic-word.is-active { opacity: 1; transform: scale(1.06); font-weight: 600; }
-.kinetic-word.is-incoming { opacity: .72; }
-.kinetic-word.is-final { opacity: max(.35, calc(1 - var(--age, 0) * .06)); }
+.kinetic-word.is-incoming { opacity: .75; }
+.kinetic-word.is-final { opacity: max(.38, calc(1 - var(--age, 0) * .055)); }
 @media (prefers-reduced-motion: reduce) { .kinetic-word { transition: opacity .2s linear; } .kinetic-word.is-active { transform: none; } }

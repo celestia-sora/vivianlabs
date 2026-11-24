@@ -190,6 +190,7 @@ export class TimestampedTtsSession {
         this.wake();
         return;
       }
+      this.o.emit({ event: "audio_alignment_end", turnId: this.turnId, sentence: job.index });
       this.turnOffsetSec += job.acc.audioDurationSec;
       this.headIndex += 1;
     }
