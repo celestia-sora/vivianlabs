@@ -3,7 +3,7 @@ import { requireAuthorizedUser } from "@/lib/auth/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { hasStandaloneAudioEventTag, speechText, speechTextWithAudioTags } from "@/lib/speech";
 import { normalizeSpeechLanguage, resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
-import { StreamingTtsSession } from "@/lib/tts-stream-session";
+import { createTtsSession, type TtsSessionLike } from "@/lib/tts-session-factory";
 
 export const maxDuration = 30;
 
@@ -62,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
       ? reqTurnId.trim().slice(0, 64)
       : crypto.randomUUID();
 
-  let session: StreamingTtsSession | null = null;
+  let session: TtsSessionLike | null = null;
   let cancelled = false;
   const encoder = new TextEncoder();
 
@@ -74,7 +74,7 @@ export async function POST(request: Request): Promise<Response> {
         }
       };
 
-      session = new StreamingTtsSession({
+      session = createTtsSession({
         apiKey,
         voiceId: effectiveVoiceId,
         language: speechLanguage,

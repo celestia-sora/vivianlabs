@@ -20,6 +20,14 @@ export type AudioStreamEvent =
       sampleRate: number;
     }
   | {
+      event: "audio_alignment";
+      turnId: string;
+      sentence: number;
+      chars: string[];
+      starts: number[];
+      ends: number[];
+    }
+  | {
       event: "audio_turn_end";
       turnId: string;
       chunkCount: number;

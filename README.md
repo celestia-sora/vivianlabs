@@ -95,12 +95,15 @@ All protected routes check sign-in via vivianAuth (`requireApiAccess`) and accou
 | `/api/conversations` | GET paginated shared conversations/messages; PUT validated, idempotent message batches |
 | `/api/custom-instructions` | GET/PATCH the shared custom instructions used by every device |
 | `/api/memory` | Read and manage memories and conversation data |
-| `/api/stt` | Convert speech to text (UI language honored) |
+| `/api/stt` | Convert speech to text (UI language honored); batch fallback when realtime is unavailable |
+| `/api/stt/token` | Mint a single-use ElevenLabs Scribe v2 Realtime token for the browser (API key stays server-side) |
 | `/api/tts` | Generate speech audio |
 | `/api/scenes/*` | Manage backgrounds |
 | `/api/models/*` | Manage private Live2D models |
 | `/api/storage/status` | Show storage use |
 | `/api/jev/status` | Show whether JEV is configured |
+
+**Kinetic Center Build.** Streamed chat speech uses ElevenLabs Text-to-Dialogue `stream/with-timestamps` (`eleven_v4`) and emits `audio_alignment` NDJSON events beside `audio_chunk`; the client reveals words from the audio playback clock. Live user speech comes from Scribe v2 Realtime (partial/committed events). Both render through the shared `KineticText` component with separate sync controllers. Set `TTS_ALIGNMENT=off` to fall back to the unaligned WebSocket path.
 
 ## Developer corner 🛠️
 

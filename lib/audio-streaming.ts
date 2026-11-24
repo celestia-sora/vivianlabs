@@ -109,6 +109,8 @@ export class AudioStreamingManager {
 
   private activeSources = new Set<AudioBufferSourceNodeLike>();
   private nextStartTime = 0;
+  private timeline: Array<{ ctxStart: number; contentStart: number; duration: number }> = [];
+  private contentCursor = 0;
   private playbackSchedulingStarted = false;
   private playbackStarted = false;
   private streamEnded = false;
@@ -173,7 +175,7 @@ export class AudioStreamingManager {
     this.preBufferBytes = [];
     this.preBufferedByteCount = 0;
     this.pendingOddByte = null;
-    this.nextStartTime = 0;
+    this.nextStartTime = 0; this.resetTimeline();
     this.playbackSchedulingStarted = false;
     this.playbackStarted = false;
     this.streamEnded = false;
@@ -231,7 +233,7 @@ export class AudioStreamingManager {
       this.preBufferedByteCount = 0;
       this.pendingOddByte = null;
       this.stopActiveSources();
-      this.nextStartTime = 0;
+      this.nextStartTime = 0; this.resetTimeline();
       this.playbackSchedulingStarted = false;
       this.playbackStarted = false;
       this.streamEnded = false;
@@ -344,7 +346,7 @@ export class AudioStreamingManager {
     this.playbackSchedulingStarted = false;
     this.playbackStarted = false;
     this.lastTurnOutcome = "interrupted";
-    this.nextStartTime = 0;
+    this.nextStartTime = 0; this.resetTimeline();
 
     this.stopActiveSources();
 
@@ -456,6 +458,8 @@ export class AudioStreamingManager {
         }
 
         this.nextStartTime = startAt + audioBuffer.duration;
+        this.timeline.push({ ctxStart: startAt, contentStart: this.contentCursor, duration: audioBuffer.duration });
+        this.contentCursor += audioBuffer.duration;
         this.activeSources.add(source);
         source.onended = () => {
           this.activeSources.delete(source);
@@ -485,6 +489,28 @@ export class AudioStreamingManager {
         const err = error instanceof Error ? error : new Error("Audio playback failed");
         this.markTurnError(attemptTurnId ?? turnId, err.message);
       });
+  }
+
+  private resetTimeline(): void {
+    this.timeline = [];
+    this.contentCursor = 0;
+  }
+
+  /**
+   * Current playback position in seconds on the turn's audio timeline (the sum
+   * of scheduled audio durations), derived from the AudioContext clock. Gaps
+   * from buffer underruns do not advance it. Null before playback is scheduled.
+   */
+  getPlaybackPositionSec(): number | null {
+    const ctx = this.context;
+    if (!ctx || this.timeline.length === 0) return null;
+    const now = ctx.currentTime;
+    let position: number | null = null;
+    for (const seg of this.timeline) {
+      if (seg.ctxStart > now) break;
+      position = seg.contentStart + Math.min(seg.duration, now - seg.ctxStart);
+    }
+    return position;
   }
 
   private mergeOddByte(bytes: Uint8Array): Uint8Array | null {
@@ -563,7 +589,7 @@ export class AudioStreamingManager {
     this.playbackSchedulingStarted = false;
     this.playbackStarted = false;
     this.streamEnded = false;
-    this.nextStartTime = 0;
+    this.nextStartTime = 0; this.resetTimeline();
 
     if (emitEndCallback) {
       this.logDiagnostic("complete", finalMetrics);

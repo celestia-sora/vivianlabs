@@ -18,7 +18,7 @@ import { vivianPersonaPrompt, vivianTurnPrompt } from "@/lib/vivian-persona";
 import { VIVIAN_STORY } from "@/lib/vivian-story";
 import { loadCompanionState, saveCompanionState } from "@/lib/companion-store";
 import { resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
-import { StreamingTtsSession } from "@/lib/tts-stream-session";
+import { createTtsSession, type TtsSessionLike } from "@/lib/tts-session-factory";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { runTools, toolsPromptBlock, webSearchTool, visionSearchIntent } from "@/lib/tools";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
@@ -520,8 +520,8 @@ async function chatReply(
   const { body, hasImage, inputMessages, recent, older, contents, supabase: quotaDb, chatQuota, groqApiKey, geminiApiKey } = prepared;
   const userKey = user.id;
   let replyEmitted = false;
-  let activeTtsSession: StreamingTtsSession | null = null;
-  const abortTtsAttempt = (session: StreamingTtsSession | null) => {
+  let activeTtsSession: TtsSessionLike | null = null;
+  const abortTtsAttempt = (session: TtsSessionLike | null) => {
     if (!session) return;
     session.abort(true);
     if (activeTtsSession === session) activeTtsSession = null;
@@ -730,7 +730,7 @@ async function chatReply(
   const startTtsAttempt = () => {
     if (!streamAudio || !elevenLabsKey || !effectiveVoiceId || !streamControl) return null;
     sawDeltaForActiveAttempt = false;
-    return new StreamingTtsSession({
+    return createTtsSession({
       apiKey: elevenLabsKey,
       voiceId: effectiveVoiceId,
       language,
@@ -753,7 +753,7 @@ async function chatReply(
 
     // Groq vision (qwen/qwen3.8-27b supports image_url inputs).
     if (!generatedData && groqApiKey) {
-      let tts: StreamingTtsSession | null = null;
+      let tts: TtsSessionLike | null = null;
       try {
         // Await vision search in parallel with request build; it started above.
         const visionSearchResult = await visionSearchPromise;
@@ -796,7 +796,7 @@ async function chatReply(
     const groqCandidates = [groqModelName()];
 
     for (const gModel of groqCandidates) {
-      let tts: StreamingTtsSession | null = null;
+      let tts: TtsSessionLike | null = null;
       try {
         const msgs = [{ role: "system" as const, content: systemPrompt }, ...promptContents];
         providerStarted = Date.now();
@@ -858,7 +858,7 @@ async function chatReply(
     ]));
 
     for (const model of geminiCandidates) {
-      let tts: StreamingTtsSession | null = null;
+      let tts: TtsSessionLike | null = null;
       try {
         const payload = shouldSearch ? { ...geminiPayload, tools: [{ google_search: {} }] } : geminiPayload;
         providerStarted = Date.now();
@@ -1037,7 +1037,7 @@ async function chatReply(
     memories,
     chatQuota,
   };
-  const finalTtsSession: StreamingTtsSession | null = activeTtsSession;
+  const finalTtsSession: TtsSessionLike | null = activeTtsSession;
   replyEmitted = true;
   if (finalTtsSession && streamControl) {
     streamControl.emitReply(200, payload);

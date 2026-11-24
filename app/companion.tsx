@@ -21,6 +21,13 @@ import { historyMessage, HISTORY_CACHE_KEY, type HistoryMessage, type HistoryCon
 import { deleteCloudHistory } from "@/lib/chat-history-client";
 import { authFetch, getAuthToken } from "@/lib/auth/fetch";
 import { speechText } from "@/lib/speech";
+import { KineticText } from "@/components/KineticText";
+import { KineticStore } from "@/lib/kinetic/types";
+import { TtsSyncController } from "@/lib/kinetic/tts-sync";
+import { TtsAlignmentTracker, parseAlignmentEvent } from "@/lib/kinetic/tts-align-client";
+import { SttSyncController } from "@/lib/kinetic/stt-sync";
+import { ScribeRealtimeClient } from "@/lib/scribe-realtime";
+import { startPcmCapture, type PcmCapture } from "@/lib/pcm-capture";
 import { hapticFeedback, hapticPatterns } from "@/lib/haptics";
 import { decayCompanionState, type CompanionState, defaultCompanionState, normalizeMood, moodLabel, type Mood } from "@/lib/companion";
 import { detectLive2DEmotion, resolveLive2DExpression, resolveLive2DMotion } from "@/lib/live2d-emotion";
@@ -256,6 +263,19 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   const chatStreamAbortRef = useRef<AbortController | null>(null);
   const userInterruptedRef = useRef(false);
   const audioStreamingRef = useRef<AudioStreamingManager | null>(null);
+  // Kinetic Center Build (Vivian side): word-synchronized speech text driven by the audio clock.
+  const [vivianKinetic] = useState(() => new KineticStore());
+  const [ttsSync] = useState(() => new TtsSyncController());
+  const [ttsTracker] = useState(() => new TtsAlignmentTracker());
+  const kineticLoopRef = useRef<number | null>(null);
+  // Kinetic Center Build (user side): live Scribe v2 Realtime transcript. Separate controller and no shared clock.
+  const [userKinetic] = useState(() => new KineticStore());
+  const [sttSync] = useState(() => new SttSyncController());
+  const scribeRef = useRef<ScribeRealtimeClient | null>(null);
+  const pcmCaptureRef = useRef<PcmCapture | null>(null);
+  const sttClearTimerRef = useRef<number | null>(null);
+  const [kineticActive, setKineticActive] = useState(false);
+  const [kineticReplyId, setKineticReplyId] = useState<string | null>(null);
   const sendingRef = useRef(false);
   const resettingRef = useRef(false);
   const memoryGenerationRef = useRef(0);
@@ -474,6 +494,8 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   const [resetNotice, setResetNotice] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
   const lastVivianMessage = messages.filter((item) => item.from === "vivian").at(-1)?.text ?? "";
+  const lastVivianId = messages.filter((item) => item.from === "vivian").at(-1)?.id;
+  const showKinetic = kineticActive && (sending || (lastVivianId !== undefined && lastVivianId === kineticReplyId));
   messagesRef.current = messages;
   activeConversationRef.current = activeConversationId;
   sendingRef.current = sending;
@@ -1565,10 +1587,16 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   useEffect(() => () => {
     micEnabledRef.current = false;
     stopRecording();
+    scribeRef.current?.stop();
+    scribeRef.current = null;
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    if (sttClearTimerRef.current !== null) { window.clearTimeout(sttClearTimerRef.current); sttClearTimerRef.current = null; }
     chatStreamAbortRef.current?.abort();
     chatStreamAbortRef.current = null;
     audioStreamingRef.current?.dispose();
     audioStreamingRef.current = null;
+    if (kineticLoopRef.current !== null) { cancelAnimationFrame(kineticLoopRef.current); kineticLoopRef.current = null; }
   }, []);
 
   async function loadMemory() {
@@ -1601,7 +1629,64 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   function markActivity() {
     lastActivityRef.current = Date.now();
   }
+  function clearUserKinetic() {
+    if (sttClearTimerRef.current !== null) { window.clearTimeout(sttClearTimerRef.current); sttClearTimerRef.current = null; }
+    sttSync.reset();
+    userKinetic.clear();
+  }
+  /** Streams the live microphone to Scribe v2 Realtime; any failure leaves the batch STT path in charge. */
+  function startRealtimeStt(stream: MediaStream, generation: number) {
+    clearUserKinetic();
+    sttSync.setLanguage(speechLanguageRef.current);
+    const client = new ScribeRealtimeClient({
+      language: speechLanguageRef.current,
+      fetchToken: async () => {
+        const response = await authFetch("/api/stt/token", { method: "POST", signal: abortAfter(8000) });
+        const data = await response.json().catch(() => null) as { token?: string } | null;
+        if (!response.ok || !data?.token) throw new Error("Scribe token unavailable");
+        return data.token;
+      },
+      callbacks: {
+        onPartial: (text) => { if (generation !== memoryGenerationRef.current) return; sttSync.partial(text); userKinetic.set(sttSync.frame()); },
+        onCommitted: (text) => { if (generation !== memoryGenerationRef.current) return; sttSync.commit(text); userKinetic.set(sttSync.frame()); },
+        onWords: (words, text) => { if (generation !== memoryGenerationRef.current) return; if (sttSync.commit(text, words)) userKinetic.set(sttSync.frame()); },
+      },
+    });
+    scribeRef.current = client;
+    client.start();
+    void startPcmCapture(stream, (pcm) => client.sendAudio(pcm)).then((capture) => {
+      if (scribeRef.current === client && recordingRef.current) pcmCaptureRef.current = capture;
+      else capture.stop();
+    }).catch((error) => { console.warn("Realtime capture unavailable; using batch STT", error); client.stop(); if (scribeRef.current === client) scribeRef.current = null; });
+  }
+  function stopKinetic() {
+    if (kineticLoopRef.current !== null) { cancelAnimationFrame(kineticLoopRef.current); kineticLoopRef.current = null; }
+    ttsSync.interrupt();
+    ttsTracker.reset();
+    vivianKinetic.clear();
+    setKineticActive(false);
+  }
+  function startKineticLoop(streamer: AudioStreamingManager) {
+    if (kineticLoopRef.current !== null) cancelAnimationFrame(kineticLoopRef.current);
+    const tick = () => {
+      kineticLoopRef.current = null;
+      if (ttsSync.currentTurnId === null) return;
+      const position = streamer.getPlaybackPositionSec();
+      if (ttsSync.isEnded && ttsSync.wordCount === 0) return;
+      if (ttsSync.isFinished(position)) {
+        // Hold the final words in their settled (past) state.
+        vivianKinetic.set(ttsSync.frame(Number.MAX_SAFE_INTEGER).map((word) => ({ ...word, state: "past" as const })));
+        return;
+      }
+      const frame = ttsSync.frame(position);
+      vivianKinetic.set(frame);
+      if (frame.length) setKineticActive(true);
+      kineticLoopRef.current = requestAnimationFrame(tick);
+    };
+    kineticLoopRef.current = requestAnimationFrame(tick);
+  }
   function stopSpeech() {
+    stopKinetic();
     speakIdRef.current += 1;
     userInterruptedRef.current = true;
     chatStreamAbortRef.current?.abort();
@@ -1968,6 +2053,8 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     const replyTiming = startTiming("send_to_reply");
     const shouldStreamAudio = !mutedRef.current;
     const turnId = crypto.randomUUID();
+    stopKinetic();
+    setKineticReplyId(replyMessageId);
     const chatAbort = new AbortController();
     chatStreamAbortRef.current = chatAbort;
     let streamWatchdog: number | undefined;
@@ -1982,6 +2069,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       void unlockAudio();
       streamer = getAudioStreamer();
       streamer.startTurn(turnId, audioContextRef.current as unknown as AudioContextLike | null);
+      ttsSync.startTurn(turnId);
+      ttsTracker.reset();
+      ttsTracker.setLanguage(speechLanguageRef.current);
+      startKineticLoop(streamer);
     }
 
     type ChatPayload = {
@@ -2055,11 +2146,17 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
               audio: String(event.audio ?? ""),
               sampleRate: typeof event.sampleRate === "number" ? event.sampleRate : undefined,
             });
+          } else if (eventType === "audio_alignment") {
+            const alignment = parseAlignmentEvent(event);
+            if (alignment && streamer.acceptsTurn(alignment.turnId)) ttsSync.addWords(turnId, ttsTracker.ingest(alignment));
           } else if (eventType === "audio_reset") {
             streamer.resetAttempt(String(event.turnId ?? ""));
+            ttsTracker.reset();
+            ttsSync.resetAttempt(turnId);
           } else if (eventType === "audio_turn_end") {
             if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
             streamer.markTurnComplete(String(event.turnId ?? ""));
+            ttsSync.end(turnId);
           } else if (eventType === "audio_error") {
             if (streamWatchdog !== undefined) { window.clearTimeout(streamWatchdog); streamWatchdog = undefined; }
             streamer.markTurnError(String(event.turnId ?? ""), String(event.error ?? "Audio streaming failed"));
@@ -2252,6 +2349,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 128000 });
       recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
       recorder.onstop = async () => {
+        const realtime = scribeRef.current;
+        scribeRef.current = null;
+        pcmCaptureRef.current?.stop();
+        pcmCaptureRef.current = null;
         // Automatic rearming waits for Vivian to finish, and never survives reset.
         const resumeListening = () => {
           if (generation !== memoryGenerationRef.current || resettingRef.current || !micEnabledRef.current || recordingRef.current) return;
@@ -2261,17 +2362,36 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           }
           void startRecording();
         };
-        if (generation !== memoryGenerationRef.current) { recorderRef.current = null; streamRef.current = null; return; }
+        if (generation !== memoryGenerationRef.current) { realtime?.stop(); clearUserKinetic(); recorderRef.current = null; streamRef.current = null; return; }
         const durationMs = Date.now() - recordingStartedAtRef.current;
         const actualMimeType = recorder.mimeType || mimeType || "audio/webm";
         const extension = actualMimeType.includes("mp4") ? "m4a" : "webm";
         if (durationMs < MIN_RECORDING_MS || !chunks.length || (voiceActivityRef.current && !voiceActivityRef.current.heardSpeech)) {
+          realtime?.stop();
+          clearUserKinetic();
           setSttPreview("ยังไม่มีเสียงที่ชัดพอค่ะ");
           window.setTimeout(() => setSttPreview(null), 2500);
           recorderRef.current = null;
           streamRef.current = null;
           window.setTimeout(resumeListening, 250);
           return;
+        }
+        // Prefer the realtime transcript (already on screen); fall back to batch STT when unavailable.
+        if (realtime) {
+          const realtimeText = await realtime.commit();
+          realtime.stop();
+          if (generation !== memoryGenerationRef.current) { clearUserKinetic(); return; }
+          const fullUtterance = sttSync.committedText() || realtimeText?.trim() || "";
+          if (fullUtterance) {
+            userKinetic.set(sttSync.frame());
+            void sendMessage(fullUtterance);
+            sttClearTimerRef.current = window.setTimeout(clearUserKinetic, 2000);
+            recorderRef.current = null;
+            streamRef.current = null;
+            window.setTimeout(resumeListening, 250);
+            return;
+          }
+          clearUserKinetic();
         }
         const form = new FormData();
         form.append("file", new Blob(chunks, { type: actualMimeType }), `vivian-recording.${extension}`);
@@ -2290,9 +2410,12 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           if (data.text?.trim()) {
             finishTiming(transcriptTiming);
             finishTiming(sttTiming, { serverTiming: response.headers.get("server-timing") ?? "unavailable" });
-            setSttPreview(data.text);
+            clearUserKinetic();
+            sttSync.setLanguage(speechLanguageRef.current);
+            sttSync.commit(data.text);
+            userKinetic.set(sttSync.frame());
             void sendMessage(data.text);
-            window.setTimeout(() => setSttPreview(null), 5000);
+            sttClearTimerRef.current = window.setTimeout(clearUserKinetic, 5000);
           } else throw new Error("STT returned no speech");
         } catch (error) {
           console.warn("STT unavailable", error);
@@ -2312,6 +2435,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       recordingStartedAtRef.current = Date.now();
       recordingRef.current = true;
       setRecording(true);
+      startRealtimeStt(stream, generation);
       // Keep the recorder open and split speech into utterances using local
       // voice activity detection. Only the resulting clip is sent to STT.
       const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -2549,6 +2673,11 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       setMessage("");
       setAttachedImage(null);
       setSttPreview(null);
+      scribeRef.current?.stop();
+      scribeRef.current = null;
+      pcmCaptureRef.current?.stop();
+      pcmCaptureRef.current = null;
+      clearUserKinetic();
       setEditingMemoryId(null);
       setMemoryDraft("");
       setConversationSearch("");
@@ -2813,9 +2942,12 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         />
       </div>
       <div className="speech-stack">
+        <KineticText store={userKinetic} variant="user" label="You said" />
         {sttPreview && <div className="speech-preview"><small>You said</small>{sttPreview}</div>}
-        <output className={`vivian-speech ${sending && !speaking ? "is-thinking" : ""}`} aria-live="polite">
-          {sending && !speaking
+        <output className={`vivian-speech ${sending && !speaking && !showKinetic ? "is-thinking" : ""}`} aria-live="polite">
+          {showKinetic
+            ? <><KineticText store={vivianKinetic} variant="vivian" /><span className="sr-only">{lastVivianMessage}</span></>
+            : sending && !speaking
             ? <span className="speech-transition" key="thinking"><span>Vivian กำลังคิด</span><span className="thinking-dots" aria-hidden="true"><i/><i/><i/></span></span>
             : !sending
               ? <span className="speech-transition" key={lastVivianMessage}>{lastVivianMessage}</span>
