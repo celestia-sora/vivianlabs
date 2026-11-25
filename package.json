@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test:persona": "node --test tests/persona.test.mjs",
     "test:persona:eval": "node --test tests/persona-eval.test.mjs",
-    "test:memory": "node --experimental-strip-types --test tests/memory.test.mjs tests/memory-v2.test.mjs tests/memory-recall.test.mjs",
+    "test:memory": "node --experimental-strip-types --test tests/memory.test.mjs tests/memory-v2.test.mjs tests/memory-recall.test.mjs tests/memory-summary.test.mjs",
     "test:memory-recall": "node --test tests/memory-recall.test.mjs",
     "test:prod": "node scripts/prod-smoke.mjs",
     "test:human": "node scripts/human-eval.mjs",

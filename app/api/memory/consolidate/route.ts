@@ -4,6 +4,15 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { loadMemorySummary, saveMemorySummary } from "@/lib/companion-store";
 import { memoryConsolidationEnabled } from "@/lib/memory-v2";
 import { runConsolidation } from "@/lib/memory-consolidation";
+import {
+  buildGroqSummaryPayload,
+  buildMemorySummaryInput,
+  isMissingSupersededColumnError,
+  MEMORY_SUMMARY_EMPTY_MESSAGE,
+  MEMORY_SUMMARY_SYSTEM_PROMPT,
+  sanitizeSummaryText,
+  type MemorySummarySourceItem,
+} from "@/lib/memory-summary";
 
 /**
  * On-demand consolidation (Phase 2, decision D3). Client idle-triggered:
@@ -14,9 +23,65 @@ import { runConsolidation } from "@/lib/memory-consolidation";
 
 const groqMemoryModelName = () =>
   process.env.GROQ_MEMORY_MODEL ?? "openai/gpt-oss-20b";
+const groqFallbackModelName = () =>
+  process.env.GROQ_MODEL ?? "qwen/qwen3.8-27b";
+const geminiSummaryModelName = () => {
+  const custom = process.env.GEMINI_MODEL;
+  if (custom && !custom.startsWith("gemini-3")) return custom;
+  return "gemini-2.5-flash";
+};
 
-const MEMORY_SUMMARY_SYSTEM_PROMPT =
-  "สรุปข้อมูลที่ Vivian จำเกี่ยวกับผู้ใช้ให้เป็นย่อหน้าสั้น ๆ ภาษาไทย เขียนในมุมมองบุคคลที่สาม เช่น \"โซระชอบชาเย็นหวานน้อย เล่นเกม RPG และทำงานด้านโปรแกรมมิ่ง...\" ใช้ภาษาธรรมชาติ ไม่ใช่รายการ ไม่เกิน 300 คำ ถ้าไม่มีข้อมูลเพียงพอให้ตอบว่า \"ยังไม่มีข้อมูลเพียงพอ\"";
+async function callGroqSummary(apiKey: string, model: string, userContent: string): Promise<{ summary: string; status?: number; finishReason?: string }> {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(30000),
+    body: JSON.stringify(buildGroqSummaryPayload(model, userContent)),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    console.warn("Groq summary generation failed", { model, status: response.status, detail: errText.slice(0, 200) });
+    return { summary: "", status: response.status };
+  }
+  const data = await response.json() as {
+    choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }>;
+  };
+  const choice = data.choices?.[0];
+  const summary = sanitizeSummaryText(choice?.message?.content ?? "");
+  if (!summary) {
+    console.warn("Groq summary generation returned empty content", { model, finishReason: choice?.finish_reason ?? "unknown" });
+  }
+  return { summary, status: response.status, finishReason: choice?.finish_reason };
+}
+
+async function callGeminiSummary(apiKey: string, userContent: string): Promise<string> {
+  const model = geminiSummaryModelName();
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: MEMORY_SUMMARY_SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: userContent }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1000 },
+      }),
+    },
+  );
+  if (!response.ok) {
+    console.warn("Gemini summary generation failed", { model, status: response.status });
+    return "";
+  }
+  const data = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  return sanitizeSummaryText(text);
+}
 
 /** GET — ดึง memory_summary จาก companion_state */
 export async function GET(request: Request) {
@@ -34,7 +99,7 @@ export async function GET(request: Request) {
 /**
  * POST — two modes based on request body:
  *   - `{ "consolidate": true }` → run memory consolidation (original behavior)
- *   - no body / other body → generate a fresh memory_summary via Groq and store it
+ *   - no body / other body → generate a fresh memory_summary via Groq (with fallback) and store it
  */
 export async function POST(request: Request) {
   const { user, denied } = await requireAuthorizedUser(request);
@@ -68,58 +133,80 @@ export async function POST(request: Request) {
   }
 
   // --- Generate summary mode ---
-  const groqApiKey = process.env.GROQ_API_KEY;
-  if (!groqApiKey) {
-    return NextResponse.json({ error: "GROQ_API_KEY not configured" }, { status: 503 });
+  const groqApiKey = process.env.GROQ_API_KEY?.trim() ?? "";
+  const geminiApiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
+  if (!groqApiKey && !geminiApiKey) {
+    return NextResponse.json({ error: "No summary provider configured" }, { status: 503 });
   }
 
   try {
     const supabase = getSupabaseAdmin();
 
-    // Load all memories (no limit)
-    const { data: memories, error: memErr } = await supabase
+    // Load active memories (bounded for token safety; fall back if superseded_by column is absent)
+    let memories: MemorySummarySourceItem[] | null = null;
+    const primaryQuery = await supabase
       .from("memories")
       .select("memory, category, importance")
       .eq("user_key", user.id)
       .is("superseded_by", null)
-      .order("importance", { ascending: false });
+      .order("importance", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(100);
 
-    if (memErr) throw memErr;
-
-    const memoriesText = (memories ?? [])
-      .map((m) => `- [${m.category}] ${m.memory}`)
-      .join("\n");
-
-    const userContent = memoriesText.trim()
-      ? `ข้อมูลความจำทั้งหมด:\n${memoriesText}`
-      : "ยังไม่มีข้อมูลความจำ";
-
-    // Call Groq to generate summary
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqApiKey}`,
-        "Content-Type": "application/json",
-      },
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({
-        model: groqMemoryModelName(),
-        messages: [
-          { role: "system", content: MEMORY_SUMMARY_SYSTEM_PROMPT },
-          { role: "user", content: userContent },
-        ],
-        temperature: 0.4,
-        max_tokens: 500,
-      }),
-    });
-
-    if (!response.ok) {
-      console.warn("Groq summary generation failed", { status: response.status });
-      return NextResponse.json({ error: "Summary generation failed" }, { status: 503 });
+    if (primaryQuery.error) {
+      if (!isMissingSupersededColumnError(primaryQuery.error)) {
+        throw primaryQuery.error;
+      }
+      const fallbackQuery = await supabase
+        .from("memories")
+        .select("memory, category, importance")
+        .eq("user_key", user.id)
+        .order("importance", { ascending: false })
+        .order("updated_at", { ascending: false })
+        .limit(100);
+      if (fallbackQuery.error) throw fallbackQuery.error;
+      memories = (fallbackQuery.data ?? []) as MemorySummarySourceItem[];
+    } else {
+      memories = (primaryQuery.data ?? []) as MemorySummarySourceItem[];
     }
 
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const summary = (data.choices?.[0]?.message?.content ?? "").trim().slice(0, 2000);
+    const input = buildMemorySummaryInput(memories);
+    if (input.count === 0) {
+      await saveMemorySummary(user.id, MEMORY_SUMMARY_EMPTY_MESSAGE, supabase);
+      return NextResponse.json({ summary: MEMORY_SUMMARY_EMPTY_MESSAGE });
+    }
+
+    const userContent = `ข้อมูลความจำทั้งหมด:\n${input.text}`;
+    let summary = "";
+
+    if (groqApiKey) {
+      const primaryModel = groqMemoryModelName();
+      const first = await callGroqSummary(groqApiKey, primaryModel, userContent).catch((err) => {
+        console.warn("Groq primary summary request error", err);
+        return { summary: "" };
+      });
+      summary = first.summary;
+
+      const fallbackModel = groqFallbackModelName();
+      if (!summary && fallbackModel !== primaryModel) {
+        const second = await callGroqSummary(groqApiKey, fallbackModel, userContent).catch((err) => {
+          console.warn("Groq fallback summary request error", err);
+          return { summary: "" };
+        });
+        summary = second.summary;
+      }
+    }
+
+    if (!summary && geminiApiKey) {
+      summary = await callGeminiSummary(geminiApiKey, userContent).catch((err) => {
+        console.warn("Gemini fallback summary request error", err);
+        return "";
+      });
+    }
+
+    if (!summary) {
+      return NextResponse.json({ error: "Summary generation failed" }, { status: 503 });
+    }
 
     // Persist to companion_state
     await saveMemorySummary(user.id, summary, supabase);

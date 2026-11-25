@@ -495,6 +495,11 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   syncUserProfileFromAccountRef.current = syncUserProfileFromAccount;
   const [editingMemoryId, setEditingMemoryId] = useState<number | null>(null);
   const [memoryDraft, setMemoryDraft] = useState("");
+  const [memorySummary, setMemorySummary] = useState("");
+  const [memorySummaryDraft, setMemorySummaryDraft] = useState("");
+  const [editingMemorySummary, setEditingMemorySummary] = useState(false);
+  const [memorySummaryBusy, setMemorySummaryBusy] = useState<"idle" | "generating" | "saving">("idle");
+  const [memorySummaryNotice, setMemorySummaryNotice] = useState<string | null>(null);
   const [backgroundMode, setBackgroundMode] = useState<keyof typeof BACKGROUNDS>("day");
   const sceneLibrary = useSceneLibrary(PRESET_SCENE_IMAGES, accountId, backgroundReady);
   sceneLibraryRef.current = sceneLibrary;
@@ -532,7 +537,12 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
 
 
   useEffect(() => {
-    if (!sidebarOpen || panel !== "conversations") return;
+    if (!sidebarOpen) return;
+    if (panel === "memories") {
+      void loadMemory();
+      return;
+    }
+    if (panel !== "conversations") return;
     const refresh = window.setInterval(() => { void loadMemory(); }, 3000);
     return () => window.clearInterval(refresh);
   }, [sidebarOpen, panel]);
@@ -1624,6 +1634,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       const data = await response.json();
       if (generation !== memoryGenerationRef.current || resettingRef.current) return;
       if (Array.isArray(data.memories)) setMemories(data.memories);
+      if (typeof data.memorySummary === "string") setMemorySummary(data.memorySummary);
       const next = normalizeCompanion(data.companion);
       if (next) setCompanion(next);
     } catch { /* Vivian stays usable while Supabase is unavailable. */ }
@@ -2667,6 +2678,62 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     setEditingMemoryId(null);
   }
 
+  async function generateMemorySummary() {
+    if (memorySummaryBusy !== "idle" || resettingRef.current) return;
+    const generation = memoryGenerationRef.current;
+    setMemorySummaryBusy("generating");
+    setMemorySummaryNotice(null);
+    try {
+      const response = await authFetch("/api/memory/consolidate", { method: "POST" });
+      const data = await response.json().catch(() => null) as { summary?: string; error?: string } | null;
+      if (generation !== memoryGenerationRef.current || resettingRef.current) return;
+      if (!response.ok || typeof data?.summary !== "string") {
+        setMemorySummaryNotice("สรุปความจำตอนนี้ไม่ติดแฮะ ลองกดใหม่อีกทีนะ");
+        return;
+      }
+      setMemorySummary(data.summary);
+      setMemorySummaryDraft(data.summary);
+      setEditingMemorySummary(false);
+      setMemorySummaryNotice("อัปเดตสรุปความจำให้แล้ว");
+    } catch {
+      if (generation === memoryGenerationRef.current) {
+        setMemorySummaryNotice("สรุปความจำตอนนี้ไม่ติดแฮะ ลองกดใหม่อีกทีนะ");
+      }
+    } finally {
+      if (generation === memoryGenerationRef.current) setMemorySummaryBusy("idle");
+    }
+  }
+
+  async function saveMemorySummaryEdit() {
+    if (memorySummaryBusy !== "idle" || resettingRef.current) return;
+    const generation = memoryGenerationRef.current;
+    setMemorySummaryBusy("saving");
+    setMemorySummaryNotice(null);
+    try {
+      const response = await authFetch("/api/memory/consolidate", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summary: memorySummaryDraft }),
+      });
+      const data = await response.json().catch(() => null) as { summary?: string } | null;
+      if (generation !== memoryGenerationRef.current || resettingRef.current) return;
+      if (!response.ok || typeof data?.summary !== "string") {
+        setMemorySummaryNotice("เซฟสรุปความจำไม่ติดแฮะ ลองอีกทีนะ");
+        return;
+      }
+      setMemorySummary(data.summary);
+      setMemorySummaryDraft(data.summary);
+      setEditingMemorySummary(false);
+      setMemorySummaryNotice("เซฟสรุปความจำให้แล้ว");
+    } catch {
+      if (generation === memoryGenerationRef.current) {
+        setMemorySummaryNotice("เซฟสรุปความจำไม่ติดแฮะ ลองอีกทีนะ");
+      }
+    } finally {
+      if (generation === memoryGenerationRef.current) setMemorySummaryBusy("idle");
+    }
+  }
+
   async function resetVivian(): Promise<void> {
     if (sendingRef.current || resettingRef.current || !history.ready) return;
     setResetConfirming(false);
@@ -2693,6 +2760,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       history.clear();
       setMessages([]);
       setMemories([]);
+      setMemorySummary("");
+      setMemorySummaryDraft("");
+      setEditingMemorySummary(false);
+      setMemorySummaryNotice(null);
       setCompanion(defaultCompanionState());
       setStreak(0);
       setMessage("");
@@ -3108,6 +3179,59 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
             })()}
             {panel === "memories" && <>
               <div className="bond-panel"><p><strong>มาหาทุกวัน</strong> {streak} วันติดละนะ</p><p><strong>ฟีลตอนนี้</strong>{moodLabel(companion.mood)}</p>{[["ความเอ็นดู", companion.affinity], ["ความไว้ใจ", companion.trust], ["ความสนิท", companion.familiarity]].map(([label, value]) => <div key={String(label)}><span>{label}</span><i><b style={{ width: `${value}%` }}/></i><em>{value}</em></div>)}</div>
+              <section className="memory-summary-card" aria-label="สรุปความจำ">
+                <div className="memory-summary-head">
+                  <strong>สรุปความจำ</strong>
+                  <div className="memory-summary-actions">
+                    <button
+                      type="button"
+                      className="memory-summary-btn is-primary"
+                      disabled={memorySummaryBusy !== "idle"}
+                      onClick={() => void generateMemorySummary()}
+                    >
+                      {memorySummaryBusy === "generating" ? "กำลังสรุป…" : memorySummary ? "สรุปใหม่" : "สรุปความจำ"}
+                    </button>
+                    {!editingMemorySummary && (
+                      <button
+                        type="button"
+                        className="memory-summary-btn"
+                        disabled={memorySummaryBusy !== "idle"}
+                        onClick={() => {
+                          setMemorySummaryDraft(memorySummary);
+                          setEditingMemorySummary(true);
+                          setMemorySummaryNotice(null);
+                        }}
+                      >
+                        แก้
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {editingMemorySummary ? (
+                  <div className="memory-edit">
+                    <textarea
+                      value={memorySummaryDraft}
+                      maxLength={2000}
+                      rows={4}
+                      placeholder="เขียนสรุปความจำเกี่ยวกับตัวเธอให้ Vivian จำไว้ได้เลย"
+                      onChange={(event) => setMemorySummaryDraft(event.target.value)}
+                    />
+                    <div>
+                      <button type="button" disabled={memorySummaryBusy !== "idle"} onClick={() => void saveMemorySummaryEdit()}>
+                        {memorySummaryBusy === "saving" ? "กำลังเซฟ…" : "เซฟ"}
+                      </button>
+                      <button type="button" disabled={memorySummaryBusy !== "idle"} onClick={() => setEditingMemorySummary(false)}>
+                        ยกเลิก
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className={memorySummary ? "memory-summary-text" : "memory-summary-empty"}>
+                    {memorySummary || "ยังไม่มีสรุปความจำ กดปุ่ม \"สรุปความจำ\" ให้ Vivian รวบรวมเรื่องที่จำไว้ได้เลย"}
+                  </p>
+                )}
+                {memorySummaryNotice && <p className="memory-summary-notice" role="status">{memorySummaryNotice}</p>}
+              </section>
               <div className="memory-list">{memories.length ? memories.map((memory) => <article key={memory.id}><Icon name="memory" size={18}/>{editingMemoryId === memory.id ? <div className="memory-edit"><textarea value={memoryDraft} maxLength={500} onChange={(event) => setMemoryDraft(event.target.value)}/><div><button type="button" onClick={() => void saveMemory(memory)}>เซฟ</button><button type="button" onClick={() => setEditingMemoryId(null)}>ยกเลิก</button></div></div> : <><p><strong>{memory.category}</strong>{memory.memory}</p><button type="button" className="memory-edit-button" onClick={() => { setEditingMemoryId(memory.id); setMemoryDraft(memory.memory); }}>แก้</button></>}</article>) : <p className="floating-empty">ตอนนี้ยังไม่มีเรื่องที่ Vivian จดไว้เลย คุยกันไปเรื่อย ๆ เดี๋ยวก็จำได้เอง</p>}</div>
             </>}
             {panel === "character" && <>

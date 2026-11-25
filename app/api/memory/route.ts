@@ -2,6 +2,7 @@ import { requireAuthorizedUser } from "@/lib/auth/server";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { defaultCompanionState } from "@/lib/companion";
+import { loadMemorySummary } from "@/lib/companion-store";
 import { resetCompanionData } from "@/lib/reset-companion";
 
 export async function GET(request: Request) {
@@ -15,11 +16,15 @@ export async function GET(request: Request) {
     const { data: conversation } = await supabase.from("conversations").select("id").eq("user_key", userKey).order("updated_at", { ascending: false }).limit(1).maybeSingle();
     const { data: messages } = conversation ? await supabase.from("messages").select("role,content,created_at").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(100) : { data: [] };
     let companion: unknown = defaultCompanionState();
+    let memorySummary = "";
     try {
       const loaded = await supabase.from("companion_state").select("affinity,trust,familiarity,mood,mood_intensity,last_idle_at,last_interaction_at").eq("user_key", userKey).maybeSingle();
       if (!loaded.error && loaded.data) companion = loaded.data;
     } catch { /* Companion table may not exist yet. */ }
-    return NextResponse.json({ memories: data ?? [], messages: messages ?? [], companion });
+    try {
+      memorySummary = await loadMemorySummary(userKey, supabase);
+    } catch { /* memory_summary column may not exist yet. */ }
+    return NextResponse.json({ memories: data ?? [], messages: messages ?? [], companion, memorySummary });
   } catch (error) {
     console.error("Memory load failed", error);
     return NextResponse.json({ memories: [], error: "Memory database is not ready" }, { status: 503 });

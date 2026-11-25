@@ -24,7 +24,8 @@ import {
   type UserProfile,
 } from "@/lib/user-profile";
 import { loadUserProfileServer } from "@/lib/user-profile-store";
-import { loadCompanionState, saveCompanionState } from "@/lib/companion-store";
+import { loadCompanionState, loadMemorySummary, saveCompanionState } from "@/lib/companion-store";
+import { buildMemorySummaryPromptBlock } from "@/lib/memory-summary";
 import { resolveElevenLabsVoiceId } from "@/lib/elevenlabs-voice";
 import { createTtsSession, type TtsSessionLike } from "@/lib/tts-session-factory";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
@@ -585,6 +586,7 @@ async function chatReply(
   // Non-critical presentation lookups have their own short deadline. Start
   // companion state first, preserving the existing overlap with JEV.
   const statePromise = loadCompanionState(userKey);
+  const memorySummaryPromise = withTimeout(loadMemorySummary(userKey), supabaseTimeoutMs, "memory summary load").catch(() => "");
   // Resolve personal instructions from the verified account on the server.
   // Never trust a client-supplied profile: switching accounts/devices must not
   // leak one account's preferences into another account's prompt.
@@ -668,7 +670,7 @@ async function chatReply(
   const queryEmbeddingPromise = plan.retrieveMemory && geminiApiKey && lastUserText
     ? embedQuery(lastUserText)
     : Promise.resolve(undefined as number[] | undefined);
-  const [memoriesRes, state, toolResults, customInstructions, effectiveVoiceId, userProfile] = await Promise.all([
+  const [memoriesRes, state, toolResults, customInstructions, effectiveVoiceId, userProfile, rawMemorySummary] = await Promise.all([
     // 1. Memories
     (async () => {
       if (!plan.retrieveMemory) return [];
@@ -699,6 +701,7 @@ async function chatReply(
     customInstructionsPromise,
     effectiveVoiceIdPromise,
     userProfilePromise,
+    memorySummaryPromise,
   ]);
 
   const memories = memoriesRes;
@@ -722,6 +725,13 @@ async function chatReply(
     });
     memoryContext = retrieval.text;
   }
+  const sanitizedMemorySummary = isSorachanAccount
+    ? rawMemorySummary
+    : sanitizeLegacySorachanText(rawMemorySummary, {
+        isSorachan: false,
+        displayName: userProfile.displayName,
+      });
+  memoryContext += buildMemorySummaryPromptBlock(sanitizedMemorySummary);
   const toolContext = toolsPromptBlock(toolResults).slice(0, TOOLS_BLOCK_CHAR_CAP);
   // Give Vivian the current place by name (never the image itself) so she
   // can talk about it naturally. When auto-scene is on, the background
