@@ -79,7 +79,7 @@ const geminiPrimaryModel = () => {
   if (custom && !custom.startsWith("gemini-3")) return custom;
   return "gemini-2.5-flash";
 };
-const memoryIntent = /(จำไว้|จำว่า|เรียกฉันว่า|ชื่อของฉัน|ฉันชอบ|ฉันไม่ชอบ|ความชอบ|favorite|prefer|my name|remember|call me)/i;
+const memoryIntent = /(จำไว้|จำว่า|จำเรื่อง|รู้จัก(เรา|ฉัน|ผม|หนู|เค้า)|เรียก(ฉัน|เรา|ผม|หนู|เค้า)ว่า|ชื่อ(ของ)?(ฉัน|เรา|ผม|หนู|เค้า)?|(ฉัน|เรา|ผม|หนู|เค้า)(เป็น|ชอบ|ไม่ชอบ|รัก|เกลียด|อยาก|ทำงาน|เรียน|เล่น|อยู่|ฝัน)|ความชอบ|งานอดิเรก|ความฝัน|favorite|prefer|my name|i like|i love|i hate|i am |i'm |remember|call me)/i;
 const recentTurnLimit = 12;
 const recentCharLimit = 1800;
 // Whole assembled middle-prompt char cap so static (≤5K tokens) + dynamic
@@ -110,14 +110,23 @@ async function callGroq(
   model = groqModelName(),
   options: { timeoutMs?: number; json?: boolean; jsonSchema?: { name: string; schema: object }; maxTokens?: number; firstToken?: () => void; onDelta?: (delta: string) => void } = {}
 ) {
+  const normalizedModel = model.trim().toLowerCase();
+  const isGptOss = normalizedModel.startsWith("openai/gpt-oss");
+  const isQwen3 = normalizedModel.includes("qwen3");
   const payload: Record<string, unknown> = {
     model,
     messages,
     ...(options.firstToken ? { stream: true } : {}),
-    // Qwen 3.8 instruct mode: skip chain-of-thought for fast, natural conversation.
-    ...(!options.json && !options.jsonSchema ? { reasoning_effort: "none", top_p: 0.9 } : {}),
+    // Qwen 3.8 instruct mode skips chain-of-thought; GPT-OSS uses low reasoning
+    // with enough completion budget so JSON extraction/compression never returns empty content.
+    ...(isGptOss
+      ? { reasoning_effort: "low", max_completion_tokens: Math.max(options.maxTokens ?? 1500, 900) }
+      : {
+          ...(isQwen3 ? { reasoning_effort: "none" } : {}),
+          ...(!options.json && !options.jsonSchema ? { top_p: 0.9 } : {}),
+          max_tokens: options.maxTokens ?? 2500,
+        }),
     temperature: options.json || options.jsonSchema ? 0 : 0.85,
-    max_tokens: options.maxTokens ?? 2500,
     ...(options.jsonSchema
       ? { response_format: { type: "json_schema", json_schema: { name: options.jsonSchema.name, schema: options.jsonSchema.schema, strict: true } } }
       : options.json
@@ -220,29 +229,34 @@ async function extractMemories(apiKey: string, userText: string, sourceMessageId
   if (userText.length < 12) return [];
   // Legacy path (flag OFF): exact previous behavior.
   if (!memoryV2ExtractionEnabled()) {
-    try {
-      const response = await callGroq(apiKey, [
-        { role: "system", content: "Extract only durable user facts from the message. Never save secrets, passwords, API keys, one-time requests, precise location, health, financial, or highly sensitive information. Return strict JSON only: {\"memories\":[{\"memory\":\"short Thai fact\",\"category\":\"preference|profile|project|relationship\",\"importance\":1-5}]}. Return an empty list unless the user explicitly states a lasting preference, identity detail, ongoing project fact, or recurring preference. Maximum 2 memories." },
-        { role: "user", content: userText },
-      ], groqMemoryModelName(), { json: true, maxTokens: 280 });
-      if (!response.ok) return [];
-      const data = await response.json();
-      const raw = data.choices?.[0]?.message?.content ?? "";
-      const parsed = JSON.parse(raw) as { memories?: StoredMemory[] };
-      const legacy = (parsed.memories ?? []).filter((item) => item.memory?.trim() && item.memory.length <= 500 && item.category !== undefined && ["preference", "profile", "project", "relationship"].includes(item.category)).slice(0, 2);
-      return legacy.map((item) => ({
-        memory: item.memory.trim(),
-        category: item.category as string,
-        type: item.category === "preference" ? "preference" : item.category === "relationship" ? "relationship" : "fact",
-        importance: Math.min(5, Math.max(1, item.importance ?? 3)),
-        importance01: (Math.min(5, Math.max(1, item.importance ?? 3)) - 1) / 4,
-        confidence: 1,
-        source_message_ids: [...sourceMessageIds],
-      }));
-    } catch (error) {
-      console.warn("Memory extraction unavailable", error);
-      return [];
+    const extractionMessages = [
+      { role: "system", content: "Extract only durable user facts from the message. Never save secrets, passwords, API keys, one-time requests, precise location, health, financial, or highly sensitive information. Return strict JSON only: {\"memories\":[{\"memory\":\"short Thai fact\",\"category\":\"preference|profile|project|relationship\",\"importance\":1-5}]}. Return an empty list unless the user states a lasting preference, personality/identity detail, ongoing project fact, or relationship preference. Maximum 4 memories." },
+      { role: "user", content: userText },
+    ];
+    const models = Array.from(new Set([groqMemoryModelName(), groqModelName()]));
+    for (const model of models) {
+      try {
+        const response = await callGroq(apiKey, extractionMessages, model, { json: true, maxTokens: 1000 });
+        if (!response.ok) continue;
+        const data = await response.json();
+        const raw = (data.choices?.[0]?.message?.content ?? "").trim();
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as { memories?: StoredMemory[] };
+        const legacy = (parsed.memories ?? []).filter((item) => item.memory?.trim() && item.memory.length <= 500 && item.category !== undefined && ["preference", "profile", "project", "relationship"].includes(item.category)).slice(0, 4);
+        return legacy.map((item) => ({
+          memory: item.memory.trim(),
+          category: item.category as string,
+          type: item.category === "preference" ? "preference" : item.category === "relationship" ? "relationship" : "fact",
+          importance: Math.min(5, Math.max(1, item.importance ?? 3)),
+          importance01: (Math.min(5, Math.max(1, item.importance ?? 3)) - 1) / 4,
+          confidence: 1,
+          source_message_ids: [...sourceMessageIds],
+        }));
+      } catch (error) {
+        console.warn("Memory extraction attempt failed", { model, error });
+      }
     }
+    return [];
   }
   // V2 path: strict schema, retry once on 400/malformed, never store/log reasoning.
   const messages = [

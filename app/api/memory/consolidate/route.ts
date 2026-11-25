@@ -170,13 +170,38 @@ export async function POST(request: Request) {
       memories = (primaryQuery.data ?? []) as MemorySummarySourceItem[];
     }
 
-    const input = buildMemorySummaryInput(memories);
+    // Also load recent user chat messages so existing conversations are included
+    // even when automatic memory extraction has not populated rows yet.
+    let recentUserMessages: Array<{ content?: string | null }> = [];
+    try {
+      const { data: convs } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_key", user.id)
+        .order("updated_at", { ascending: false })
+        .limit(5);
+      const convIds = (convs ?? []).map((c) => c.id).filter(Boolean);
+      if (convIds.length > 0) {
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("content")
+          .in("conversation_id", convIds)
+          .eq("role", "user")
+          .order("created_at", { ascending: false })
+          .limit(30);
+        recentUserMessages = (msgs ?? []) as Array<{ content?: string | null }>;
+      }
+    } catch (msgErr) {
+      console.warn("Recent user messages unavailable for summary", msgErr);
+    }
+
+    const input = buildMemorySummaryInput(memories, recentUserMessages);
     if (input.count === 0) {
       await saveMemorySummary(user.id, MEMORY_SUMMARY_EMPTY_MESSAGE, supabase);
       return NextResponse.json({ summary: MEMORY_SUMMARY_EMPTY_MESSAGE });
     }
 
-    const userContent = `ข้อมูลความจำทั้งหมด:\n${input.text}`;
+    const userContent = input.text;
     let summary = "";
 
     if (groqApiKey) {

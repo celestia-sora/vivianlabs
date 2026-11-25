@@ -45,6 +45,18 @@ test("buildMemorySummaryInput skips empty/superseded items and respects char cap
   assert.equal(bounded.text.includes("ของเก่า"), false);
 });
 
+test("buildMemorySummaryInput includes recent user chat messages when memories list is empty", () => {
+  const result = buildMemorySummaryInput([], [
+    { content: "โอเค" },
+    { content: "เราชอบเทคโนโลยี AI เขียนโปรแกรม อนิเมะ VTuber แล้วก็ชอบสร้างอะไรใหม่ ๆ" },
+  ]);
+  assert.equal(result.memoryCount, 0);
+  assert.equal(result.messageCount, 1);
+  assert.equal(result.count, 1);
+  assert.ok(result.text.includes("เทคโนโลยี AI"));
+  assert.equal(result.text.includes("โอเค"), false);
+});
+
 test("sanitizeSummaryText strips think tags and trims", () => {
   const raw = "<think>internal reasoning</think>\n\nผู้ใช้ชอบชาเย็นหวานน้อย  ";
   assert.equal(sanitizeSummaryText(raw), "ผู้ใช้ชอบชาเย็นหวานน้อย");

@@ -12,8 +12,17 @@ export interface MemorySummarySourceItem {
   superseded?: boolean | null;
 }
 
-export function buildMemorySummaryInput(items: MemorySummarySourceItem[]): { text: string; count: number } {
-  const lines: string[] = [];
+export interface MemorySummaryMessageItem {
+  content?: string | null;
+}
+
+export function buildMemorySummaryInput(
+  items: MemorySummarySourceItem[],
+  recentUserMessages: MemorySummaryMessageItem[] = [],
+): { text: string; count: number; memoryCount: number; messageCount: number } {
+  const memoryHeader = "ข้อมูลความจำที่จดไว้:\n";
+  const messageHeader = "ข้อความล่าสุดที่ผู้ใช้เล่าให้ Vivian ฟัง:\n";
+  const memoryLines: string[] = [];
   let totalChars = 0;
 
   for (const item of items) {
@@ -22,12 +31,44 @@ export function buildMemorySummaryInput(items: MemorySummarySourceItem[]): { tex
     if (!text) continue;
     const category = typeof item.category === "string" && item.category.trim() ? item.category.trim() : "general";
     const line = `- [${category}] ${text.slice(0, 300)}`;
-    if (lines.length > 0 && totalChars + line.length + 1 > MEMORY_SUMMARY_INPUT_CHAR_CAP) break;
-    lines.push(line);
-    totalChars += line.length + (lines.length > 1 ? 1 : 0);
+    const extra = memoryLines.length === 0 ? memoryHeader.length + line.length : 1 + line.length;
+    if (memoryLines.length > 0 && totalChars + extra > MEMORY_SUMMARY_INPUT_CHAR_CAP) break;
+    memoryLines.push(line);
+    totalChars += extra;
   }
 
-  return { text: lines.join("\n"), count: lines.length };
+  const messageLines: string[] = [];
+  const seen = new Set<string>();
+  for (const msg of recentUserMessages) {
+    const text = typeof msg.content === "string" ? msg.content.trim().replace(/\s+/g, " ") : "";
+    if (text.length < 8) continue;
+    const clipped = text.slice(0, 500);
+    if (seen.has(clipped)) continue;
+    seen.add(clipped);
+    const line = `- ${clipped}`;
+    const sectionPrefix = messageLines.length === 0
+      ? (memoryLines.length > 0 ? 2 : 0) + messageHeader.length
+      : 1;
+    const extra = sectionPrefix + line.length;
+    if ((memoryLines.length > 0 || messageLines.length > 0) && totalChars + extra > MEMORY_SUMMARY_INPUT_CHAR_CAP) break;
+    messageLines.push(line);
+    totalChars += extra;
+  }
+
+  const sections: string[] = [];
+  if (memoryLines.length > 0) {
+    sections.push(`${memoryHeader}${memoryLines.join("\n")}`);
+  }
+  if (messageLines.length > 0) {
+    sections.push(`${messageHeader}${messageLines.join("\n")}`);
+  }
+
+  return {
+    text: sections.join("\n\n"),
+    count: memoryLines.length + messageLines.length,
+    memoryCount: memoryLines.length,
+    messageCount: messageLines.length,
+  };
 }
 
 export function sanitizeSummaryText(raw: string): string {
