@@ -1,3 +1,4 @@
+import { isSorachanEmail } from "@/lib/auth/policy";
 import { requireAuthorizedUser } from "@/lib/auth/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -18,6 +19,7 @@ export async function preferences(request: Request, write: boolean): Promise<Res
   if (denied) return denied;
 
   const defaultEnvVoiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
+  const isSorachan = isSorachanEmail(user.email);
   let voiceId: string | undefined;
   let language: ElevenLabsLanguageCode | undefined;
 
@@ -34,6 +36,17 @@ export async function preferences(request: Request, write: boolean): Promise<Res
     if (!hasVoice && !hasLang) {
       return Response.json({ error: "Provide a valid voiceId (string) or speechLanguage" }, { status: 400, headers });
     }
+    if (hasVoice && !isSorachan) {
+      return Response.json(
+        {
+          error: "การเปลี่ยน Voice ID ใช้ได้เฉพาะแพลน Sorachan เท่านั้น",
+          status: 403,
+          code: "TIER_REQUIRED",
+          requiredTier: "sorachan",
+        },
+        { status: 403, headers },
+      );
+    }
     if (hasVoice) voiceId = (record.voiceId as string).trim();
     if (hasLang) language = record.speechLanguage as ElevenLabsLanguageCode;
   }
@@ -44,13 +57,16 @@ export async function preferences(request: Request, write: boolean): Promise<Res
       ? await saveVoicePreferences(db, user.id, { voiceId, speechLanguage: language }, defaultEnvVoiceId)
       : await getVoicePreferences(db, user.id, defaultEnvVoiceId);
 
-    return Response.json(prefs, { headers });
+    return Response.json(
+      isSorachan ? prefs : { ...prefs, voiceId: defaultEnvVoiceId },
+      { headers },
+    );
   } catch {
     if (write) {
       return Response.json({ error: "Could not reach database" }, { status: 503, headers });
     }
     return Response.json({
-      voiceId: voiceId ?? defaultEnvVoiceId,
+      voiceId: isSorachan ? (voiceId ?? defaultEnvVoiceId) : defaultEnvVoiceId,
       defaultVoiceId: defaultEnvVoiceId,
       speechLanguage: language ?? DEFAULT_SPEECH_LANGUAGE,
     }, { headers });

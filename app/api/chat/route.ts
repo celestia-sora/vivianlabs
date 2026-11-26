@@ -682,7 +682,7 @@ async function chatReply(
     }
   })();
   const effectiveVoiceIdPromise = streamAudio
-    ? resolveElevenLabsVoiceId(body.voiceId, userKey)
+    ? resolveElevenLabsVoiceId(body.voiceId, userKey, undefined, chatQuota.tier === "sorachan")
     : Promise.resolve("");
   // Always load the scene catalog for chat turns, even when JEV is
   // disabled/unconfigured. The deterministic label match in chat-decision

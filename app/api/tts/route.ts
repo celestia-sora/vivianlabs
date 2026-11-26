@@ -1,3 +1,4 @@
+import { isSorachanEmail } from "@/lib/auth/policy";
 import { requireAuthorizedUser } from "@/lib/auth/server";
 import { NextResponse } from "next/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
@@ -26,7 +27,7 @@ export async function POST(request: Request): Promise<Response> {
   const { text, language, voiceId: reqVoiceId } = body as Record<string, unknown>;
   if (typeof text !== "string" || text.length > 5000) return NextResponse.json({ error: "Text is required and must be under 5000 characters", status: 400 }, { status: 400 });
 
-  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId, user.id);
+  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId, user.id, undefined, isSorachanEmail(user.email));
   if (!effectiveVoiceId) return NextResponse.json({ error: "ELEVENLABS_VOICE_ID is not configured and no voiceId provided", status: 500 }, { status: 500 });
 
   const speechLanguage = normalizeSpeechLanguage(language);

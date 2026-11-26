@@ -25,7 +25,12 @@ export async function resolveElevenLabsVoiceId(
   reqVoiceId?: unknown,
   userId = "global",
   dbClient?: SupabaseClient,
+  allowCustomVoice = true,
 ): Promise<string> {
+  if (!allowCustomVoice) {
+    return (process.env.ELEVENLABS_VOICE_ID ?? "").trim();
+  }
+
   let effectiveVoiceId =
     typeof reqVoiceId === "string" && reqVoiceId.trim() ? reqVoiceId.trim() : "";
 

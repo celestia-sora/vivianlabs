@@ -3355,42 +3355,47 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
               {modelNotice && <p className="model-notice" role="alert">{modelNotice}</p>}
             </>}
             {panel === "scenes" && <><SceneManager library={sceneLibrary} cloudAllowed={account ? account.capabilities.canUseCloudScenes : true} onRequestSelected={() => setRequestModalOpen(true)}/><p className="floating-note">ฉากเริ่มต้น</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
-            {panel === "voice" && <>
-              <button type="button" className="floating-option" onClick={() => { setMuted((value) => { const next = !value; if (next) stopSpeech(); return next; }); }}>
-                <Icon name="sound" size={18}/> เสียง Vivian <strong>{muted ? "ปิดอยู่" : "เปิดอยู่"}</strong>
-              </button>
-              <div className="custom-instructions voice-id-preferences">
-                <strong>11Labs Voice ID</strong>
-                <p>Voice ID ที่ใช้อยู่ตอนนี้ (ใช้ร่วมกันทุกเครื่อง): <code style={{ color: "#241329", background: "#e0d6ff", padding: "2px 6px", borderRadius: "4px" }}>{voiceId || "ค่าเริ่มต้น"}</code></p>
-                <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-                  <input
-                    type="text"
-                    value={voiceIdInput}
-                    placeholder="วาง 11Labs Voice ID ตรงนี้..."
-                    onChange={(e) => setVoiceIdInput(e.target.value)}
-                    style={{ flex: 1, padding: "8px 12px", borderRadius: "10px", border: "1px solid rgba(36,19,41,0.2)", background: "rgba(255,255,255,0.65)", color: "#241329", font: "inherit", fontSize: "13px" }}
-                  />
-                  <button
-                    type="button"
-                    className="floating-option"
-                    style={{ margin: 0, padding: "8px 14px" }}
-                    onClick={() => saveVoiceId(voiceIdInput)}
-                  >
-                    เซฟ
-                  </button>
-                </div>
-              </div>
-              <p role="status">{voiceNotice || "เซฟแล้ว (ใช้ร่วมกันทุกเครื่อง)"}</p>
-              {voiceNotice.includes("ไม่ขึ้น") || voiceNotice.includes("ไม่ติด") ? (
-                <button type="button" onClick={() => { if (voiceNotice.includes("โหลด")) void refreshVoicePreferences(); else saveVoiceId(voiceIdInput); }}>ลองใหม่อีกที</button>
-              ) : null}
-              <button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}>
-                <Icon name="language" size={18}/> ภาษาที่พูด <strong>{speechLanguage.toUpperCase()}</strong>
-              </button>
-              <button type="button" className="floating-option" onClick={toggleRecording}>
-                <Icon name="mic" size={18}/> ไมโครโฟน <strong>{recording ? "กำลังฟังอยู่" : "กดเพื่อพูด"}</strong>
-              </button>
-            </>}
+            {panel === "voice" && (() => {
+              const isSorachanVoice = account ? account.tier === "sorachan" : cloudLibrary?.tier === "sorachan";
+              return <>
+                <button type="button" className="floating-option" onClick={() => { setMuted((value) => { const next = !value; if (next) stopSpeech(); return next; }); }}>
+                  <Icon name="sound" size={18}/> เสียง Vivian <strong>{muted ? "ปิดอยู่" : "เปิดอยู่"}</strong>
+                </button>
+                {isSorachanVoice && <>
+                  <div className="custom-instructions voice-id-preferences">
+                    <strong>11Labs Voice ID</strong>
+                    <p>Voice ID ที่ใช้อยู่ตอนนี้ (ใช้ร่วมกันทุกเครื่อง): <code style={{ color: "#241329", background: "#e0d6ff", padding: "2px 6px", borderRadius: "4px" }}>{voiceId || "ค่าเริ่มต้น"}</code></p>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                      <input
+                        type="text"
+                        value={voiceIdInput}
+                        placeholder="วาง 11Labs Voice ID ตรงนี้..."
+                        onChange={(e) => setVoiceIdInput(e.target.value)}
+                        style={{ flex: 1, padding: "8px 12px", borderRadius: "10px", border: "1px solid rgba(36,19,41,0.2)", background: "rgba(255,255,255,0.65)", color: "#241329", font: "inherit", fontSize: "13px" }}
+                      />
+                      <button
+                        type="button"
+                        className="floating-option"
+                        style={{ margin: 0, padding: "8px 14px" }}
+                        onClick={() => saveVoiceId(voiceIdInput)}
+                      >
+                        เซฟ
+                      </button>
+                    </div>
+                  </div>
+                  <p role="status">{voiceNotice || "เซฟแล้ว (ใช้ร่วมกันทุกเครื่อง)"}</p>
+                  {voiceNotice.includes("ไม่ขึ้น") || voiceNotice.includes("ไม่ติด") ? (
+                    <button type="button" onClick={() => { if (voiceNotice.includes("โหลด")) void refreshVoicePreferences(); else saveVoiceId(voiceIdInput); }}>ลองใหม่อีกที</button>
+                  ) : null}
+                </>}
+                <button type="button" className="floating-option" onClick={() => setLanguageOpen(true)}>
+                  <Icon name="language" size={18}/> ภาษาที่พูด <strong>{speechLanguage.toUpperCase()}</strong>
+                </button>
+                <button type="button" className="floating-option" onClick={toggleRecording}>
+                  <Icon name="mic" size={18}/> ไมโครโฟน <strong>{recording ? "กำลังฟังอยู่" : "กดเพื่อพูด"}</strong>
+                </button>
+              </>;
+            })()}
              {panel === "status" && <StorageStatusPanel account={account} onRequestSelected={() => setRequestModalOpen(true)}/>}
               {panel === "settings" && <>
                 <TierSettingsCard account={account} accountEmail={accountEmail} accountId={accountId} loading={accountLoading} onOpenRequest={() => setRequestModalOpen(true)} />

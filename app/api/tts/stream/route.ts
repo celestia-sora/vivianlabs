@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isSorachanEmail } from "@/lib/auth/policy";
 import { requireAuthorizedUser } from "@/lib/auth/server";
 import { rateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { hasStandaloneAudioEventTag, speechText, speechTextWithAudioTags } from "@/lib/speech";
@@ -36,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId, user.id);
+  const effectiveVoiceId = await resolveElevenLabsVoiceId(reqVoiceId, user.id, undefined, isSorachanEmail(user.email));
   if (!effectiveVoiceId) {
     return NextResponse.json(
       { error: "ELEVENLABS_VOICE_ID is not configured and no voiceId provided", status: 500 },

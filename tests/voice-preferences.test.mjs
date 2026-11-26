@@ -66,6 +66,7 @@ function handler({
   denied = null,
   unavailable = false,
   legacyNoVoiceId = false,
+  isSorachan = true,
   user = { id: "user-voice-a", email: "a@example.com" },
 } = {}) {
   const exports = {};
@@ -82,6 +83,11 @@ function handler({
     AbortSignal,
     process: { env: {} },
     require(name) {
+      if (name === "@/lib/auth/policy") {
+        return {
+          isSorachanEmail: () => isSorachan,
+        };
+      }
       if (name === "@/lib/auth/server") {
         return {
           requireAuthorizedUser: async () => (denied ? { user: null, denied } : { user, denied: null }),
@@ -164,4 +170,27 @@ test("unauthorized callers cannot read or write; cloud failure returns 503", asy
   assert.equal(await handler({ denied, unavailable: true }).PATCH(request({ voiceId: "x" })), denied);
   assert.equal(await handler({ denied, unavailable: true }).GET(new Request("https://vivian.example")), denied);
   assert.equal((await handler({ unavailable: true }).PATCH(request({ voiceId: "x" }))).status, 503);
+});
+
+test("only Sorachan tier accounts can change voiceId; other tiers can still change speechLanguage", async () => {
+  storedByUser = new Map([["user-free", { id: "user-free", voice_id: "legacyCustom", speech_language: "th" }]]);
+  const freeUser = { id: "user-free", email: "free@example.com" };
+
+  // Non-Sorachan cannot PATCH voiceId (403 TIER_REQUIRED)
+  const rejected = await handler({ user: freeUser, isSorachan: false }).PATCH(request({ voiceId: "custom123" }));
+  assert.equal(rejected.status, 403);
+  const rejectedBody = await rejected.json();
+  assert.equal(rejectedBody.code, "TIER_REQUIRED");
+  assert.equal(rejectedBody.requiredTier, "sorachan");
+
+  // Non-Sorachan GET always receives default voiceId (not legacyCustom)
+  const loaded = await (await handler({ user: freeUser, isSorachan: false }).GET(new Request("https://vivian.example"))).json();
+  assert.equal(loaded.voiceId, "");
+
+  // Non-Sorachan can still change speechLanguage
+  const langSaved = await handler({ user: freeUser, isSorachan: false }).PATCH(request({ speechLanguage: "en" }));
+  assert.equal(langSaved.status, 200);
+  const langBody = await langSaved.json();
+  assert.equal(langBody.speechLanguage, "en");
+  assert.equal(langBody.voiceId, "");
 });
