@@ -207,11 +207,14 @@ function SmoothButton({
       className?: string;
       ref?: Ref<HTMLButtonElement>;
     }>;
+    // mergeRefs returns a callback ref and does not read .current during render.
+    // eslint-disable-next-line react-hooks/refs
+    const mergedChildRef = mergeRefs(ref, child.props.ref, localRef);
     return cloneElement(child, {
       ...props,
       className: cn(classes, child.props.className),
       "data-variant": variantName,
-      ref: mergeRefs(ref, child.props.ref, localRef),
+      ref: mergedChildRef,
     } as never);
   }
 

@@ -17,7 +17,6 @@ function getSceneImageTokenSecret(): string | null {
     process.env.SCENE_IMAGE_TOKEN_SECRET?.trim() ||
     process.env.VIVIAN_INTERNAL_TOKEN?.trim() ||
     process.env.TIER_ACTION_SECRET?.trim() ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
     "";
   if (configured) return configured;
   if (process.env.NODE_ENV === "development" && process.env.DEV_BYPASS_LOGIN === "true") {

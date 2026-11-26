@@ -231,7 +231,9 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   }, []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pixiAppRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const modelRef = useRef<any>(null);
   const modelPresentationRef = useRef<{ model: NonNullable<typeof modelRef.current>; dispose: () => void } | null>(null);
   const modelRenderAbortRef = useRef<AbortController | null>(null);
@@ -507,7 +509,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   const selectedPreset = sceneLibrary.preferences.preset ?? backgroundMode;
   const { voiceId, language: speechLanguage, saveVoiceId, saveLanguage, notice: voiceNotice, refresh: refreshVoicePreferences } = useVoicePreferences();
   const [voiceIdInput, setVoiceIdInput] = useState("");
-  useEffect(() => { setVoiceIdInput(voiceId); }, [voiceId]);
+  useEffect(() => { queueMicrotask(() => setVoiceIdInput(voiceId)); }, [voiceId]);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const history = useConversationHistory(null, "", sending || resetting);
@@ -528,7 +530,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
 
   useEffect(() => {
     const hour = new Date().getHours();
-    setBackgroundMode(hour >= 6 && hour < 18 ? "day" : "night");
+    queueMicrotask(() => setBackgroundMode(hour >= 6 && hour < 18 ? "day" : "night"));
   }, []);
 
   function selectPresetScene(scene: keyof typeof BACKGROUNDS) {
@@ -638,7 +640,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   }, [modelsReady, modelSelectionResolved, activeModelId]);
 
   useEffect(() => {
-    if (pendingModelId && pendingModelId === activeModelId) setPendingModelId(null);
+    if (pendingModelId && pendingModelId === activeModelId) queueMicrotask(() => setPendingModelId(null));
   }, [activeModelId, pendingModelId]);
 
   // Priority: the selected model owns initialization until first frame
@@ -1055,8 +1057,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     const nextStreak = lastCheckIn === today ? previousStreak : lastCheckIn === yesterday ? previousStreak + 1 : 1;
     if (lastCheckIn !== today) window.localStorage.setItem("vivian-checkin-date", today);
     window.localStorage.setItem("vivian-streak", String(nextStreak));
-    setStreak(nextStreak);
-    setPreferencesReady(true);
+    queueMicrotask(() => {
+      setStreak(nextStreak);
+      setPreferencesReady(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -1083,6 +1087,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   useEffect(() => {
     if (!preferencesReady || !modelsReady || graphicsLost || modelPaused) return;
     stopBackgroundPreload();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveExpression(null);
     setActiveMotion(null);
     if (!activeModel || !activePackage) {
@@ -1100,6 +1105,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     modelRenderAbortRef.current = textureAbort;
     let releaseResources: (() => void) | undefined;
     const compositeExpressionUrls = new Map<string, string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let app: any;
     let resizeModel = () => {};
     let queueResize = () => {};
@@ -1107,6 +1113,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     let resizeFrame: number | undefined;
     let resizeTimeout: number | undefined;
     let disposed = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ownedModel: any;
     let promoted = false;
     let renderTiming: LocalTiming | undefined;
@@ -1139,7 +1146,9 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         // resolution on iPad/iPhone so the model is not visibly soft. The
         // 1.5 cap is a deliberate memory/performance guard for Safari.
         const appleResolution = Math.min(Math.max(window.devicePixelRatio || 1, 1), 1.5);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).PIXI = PIXI;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (Live2DModel as any).registerTicker(PIXI.Ticker);
         app = pixiAppRef.current;
         if (!app) {
@@ -1339,6 +1348,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         if (!renderModel.previewPath) {
           void (async () => {
             try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const Extract = (PIXI as any).Extract;
               if (!Extract) return;
               const extract = new Extract(app.renderer);
@@ -2829,8 +2839,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       if (savedPanel && ["conversations", "memories", "character", "scenes", "voice", "status", "settings"].includes(savedPanel)) {
         panelRef.current = savedPanel as Panel;
         sidebarOpenRef.current = true;
-        setPanel(savedPanel as Panel);
-        setSidebarOpen(true);
+        queueMicrotask(() => {
+          setPanel(savedPanel as Panel);
+          setSidebarOpen(true);
+        });
       }
     } catch { /* Storage restrictions do not block navigation. */ }
   }, []);

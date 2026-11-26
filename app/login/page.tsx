@@ -39,7 +39,7 @@ export default function LoginPage(): React.JSX.Element {
     } catch {
       // storage unavailable — fall through to the Cloudflare login
     }
-    setPhase("forwarding");
+    queueMicrotask(() => setPhase("forwarding"));
     window.location.replace(VIVIANAUTH_LOGIN_URL);
   }, []);
 

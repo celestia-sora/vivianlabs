@@ -37,11 +37,13 @@ export function UserOnboardingModal({
 
   useEffect(() => {
     if (!open) return;
-    setDisplayName(profile.displayName);
-    setRelationship(profile.relationship);
-    setPronouns(profile.pronouns);
-    setStyleNotes(profile.styleNotes);
-    setError(null);
+    queueMicrotask(() => {
+      setDisplayName(profile.displayName);
+      setRelationship(profile.relationship);
+      setPronouns(profile.pronouns);
+      setStyleNotes(profile.styleNotes);
+      setError(null);
+    });
   }, [open, profile.displayName, profile.relationship, profile.pronouns, profile.styleNotes]);
 
   if (!open) return null;

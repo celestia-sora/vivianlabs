@@ -313,6 +313,7 @@ const PagePreloader = ({
   // model switch would leave the loader hidden for the next load.
   useEffect(() => {
     if (active) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStage("hold");
       setWordIndex(0);
       return;

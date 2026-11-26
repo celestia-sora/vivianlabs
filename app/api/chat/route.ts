@@ -104,9 +104,33 @@ async function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string
   }
 }
 
+type GroqMessage = {
+  role: string;
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+};
+
+type GeneratedSourceItem = {
+  web?: { title?: string; uri?: string };
+  type?: string;
+  url_citation?: { title?: string; url?: string };
+};
+
+type GeneratedResponse = {
+  choices?: Array<{
+    message?: { content?: string | null; annotations?: GeneratedSourceItem[] };
+    finish_reason?: string;
+  }>;
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    groundingMetadata?: { groundingChunks?: GeneratedSourceItem[] };
+    finishReason?: string;
+  }>;
+  usage?: Record<string, unknown>;
+} & Record<string, unknown>;
+
 async function callGroq(
   apiKey: string,
-  messages: any[],
+  messages: GroqMessage[],
   model = groqModelName(),
   options: { timeoutMs?: number; json?: boolean; jsonSchema?: { name: string; schema: object }; maxTokens?: number; firstToken?: () => void; onDelta?: (delta: string) => void } = {}
 ) {
@@ -148,7 +172,7 @@ async function callGroq(
     const mult = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000 }[m[2]] ?? 1;
     return Number(m[1]) * mult;
   };
-  const makePayload = (messages: any[]) => ({
+  const makePayload = (messages: GroqMessage[]) => ({
     ...payload,
     messages,
   });
@@ -194,7 +218,7 @@ async function callGroq(
  * context while preserving the start/end of Vivian's system prompt and the
  * newest dialogue turns. Never retry the same oversized payload unchanged.
  */
-function compactGroqMessages(messages: any[]): any[] {
+function compactGroqMessages(messages: GroqMessage[]): GroqMessage[] {
   const system = messages.find((message) => message.role === "system");
   const dialogue = messages.filter((message) => message.role !== "system").slice(-4);
   const compactSystem = system
@@ -853,7 +877,7 @@ async function chatReply(
         ...promptContents,
       ];
 
-  let generatedData: any = null;
+  let generatedData: GeneratedResponse | null = null;
   let providerStarted = 0;
   const observeToken = (provider: string) => firstToken ? () => firstToken(provider, { preparationMs: providerStarted - requestStarted, providerMs: Date.now() - providerStarted }) : undefined;
 
@@ -1029,7 +1053,7 @@ async function chatReply(
   const message = data.choices?.[0]?.message;
   const candidate = data.candidates?.[0];
   const generatedText = (provider === "gemini"
-    ? candidate?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("")
+    ? candidate?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("") ?? ""
     : typeof message?.content === "string" ? message.content : "").trim();
   const sources = (provider === "gemini" && shouldSearch ? candidate?.groundingMetadata?.groundingChunks ?? [] : message?.annotations ?? [])
     .map((item: { web?: { title?: string; uri?: string }; type?: string; url_citation?: { title?: string; url?: string } }) => provider === "gemini" && shouldSearch ? item.web : item.type === "url_citation" ? { title: item.url_citation?.title, uri: item.url_citation?.url } : undefined)

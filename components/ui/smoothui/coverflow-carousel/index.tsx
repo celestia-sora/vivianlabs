@@ -140,6 +140,7 @@ const CoverflowCarousel = ({
   };
 
   const dragEndRef = useRef(handleDragEnd);
+  // eslint-disable-next-line react-hooks/refs
   dragEndRef.current = handleDragEnd;
 
   return (

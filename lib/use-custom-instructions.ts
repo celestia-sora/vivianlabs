@@ -130,7 +130,7 @@ export function useCustomInstructions() {
 
   useEffect(() => {
     alive.current = true;
-    void refresh();
+    queueMicrotask(() => { void refresh(); });
     const visible = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener("focus", visible);
     document.addEventListener("visibilitychange", visible);

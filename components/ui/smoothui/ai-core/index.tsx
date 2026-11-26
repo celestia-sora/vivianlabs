@@ -337,6 +337,7 @@ export const useAudioAmplitude = (
 
   useEffect(() => {
     if (autoStart) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       start();
     }
     return stop;

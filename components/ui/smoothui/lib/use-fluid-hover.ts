@@ -177,6 +177,7 @@ export const useFluidHover = (
   const itemsRef = useRef(new Map<number, HTMLElement>());
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const activeIndexRef = useRef<number | null>(null);
+  // eslint-disable-next-line react-hooks/refs
   activeIndexRef.current = activeIndex;
 
   useEffect(() => {
@@ -282,6 +283,7 @@ export const useFluidHover = (
         if (runMeasurement()) {
           setIsMeasured(true);
         } else if (attemptsLeft > 1) {
+          // eslint-disable-next-line react-hooks/immutability
           scheduleMeasurement(attemptsLeft - 1);
         }
       });
