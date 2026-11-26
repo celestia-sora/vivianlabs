@@ -1,10 +1,16 @@
 import { authFetch } from "@/lib/auth/fetch";
 import type { HistoryConversation, HistoryMessage } from "@/lib/chat-history";
 
+export class HistoryRequestError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
 async function requestHistory(url: string, init: RequestInit = {}) {
   const response = await authFetch(url, { ...init, cache: "no-store", signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? "Chat history is temporarily unavailable.");
+  if (!response.ok) throw new HistoryRequestError(data.error ?? "Chat history is temporarily unavailable.", response.status);
   return data;
 }
 export async function fetchHistory(signal?: AbortSignal): Promise<HistoryConversation[]> {

@@ -1,7 +1,7 @@
 "use client";
 import { scheduleBackgroundWork } from "@/lib/startup-background";
 import { useCallback, useEffect, useRef, useReducer, type SetStateAction } from "react";
-import { appendHistory, fetchHistory } from "@/lib/chat-history-client";
+import { appendHistory, fetchHistory, HistoryRequestError } from "@/lib/chat-history-client";
 import { HISTORY_ACTIVE_KEY, HISTORY_CACHE_KEY, mergeHistory, normalizeHistory, type HistoryConversation, type HistoryMessage } from "@/lib/chat-history";
 
 interface HistoryView {
@@ -60,6 +60,8 @@ export function useConversationHistory(initial: HistoryMessage | null, pendingTe
     const currentGeneration = generation.current;
     const work = async () => {
       try {
+        let hadTransientError = false;
+        const staleIds = new Set<string>();
         for (const conversation of state.current.conversations) {
           // A fresh welcome stays ephemeral until the user speaks.
           if (!conversation.messages.some((message) => message.from === "me")) continue;
@@ -67,21 +69,51 @@ export function useConversationHistory(initial: HistoryMessage | null, pendingTe
           for (let index = 0; index < pending.length; index += 100) {
             if (paused.current || generation.current !== currentGeneration) return;
             const batch = pending.slice(index, index + 100);
-            await appendHistory(conversation, batch, !known.current.has(conversation.id) && !conversation.cloud);
-            cloudAvailable.current = true;
-            known.current.add(conversation.id);
-            batch.forEach((message) => acknowledged.current.add(message.id!));
-            cache(state.current.conversations);
+            try {
+              await appendHistory(conversation, batch, !known.current.has(conversation.id) && !conversation.cloud);
+              cloudAvailable.current = true;
+              known.current.add(conversation.id);
+              batch.forEach((message) => acknowledged.current.add(message.id!));
+              cache(state.current.conversations);
+            } catch (error) {
+              if (error instanceof HistoryRequestError && (error.status === 409 || error.status === 404)) {
+                // Conversation was deleted on the server or belongs to another account;
+                // stop retrying it forever and prune it from local state/cache.
+                staleIds.add(conversation.id);
+                break;
+              }
+              hadTransientError = true;
+              throw error;
+            }
           }
         }
-        if (mounted.current && generation.current === currentGeneration) if (cloudAvailable.current) setNotice(null);
+        if (staleIds.size && mounted.current && generation.current === currentGeneration) {
+          const remaining = state.current.conversations.filter((item) => !staleIds.has(item.id));
+          for (const id of staleIds) {
+            known.current.delete(id);
+            const dropped = state.current.conversations.find((item) => item.id === id);
+            dropped?.messages.forEach((message) => { if (message.id) acknowledged.current.delete(message.id); });
+          }
+          const activeDropped = staleIds.has(state.current.activeConversationId);
+          const nextId = activeDropped ? crypto.randomUUID() : state.current.activeConversationId;
+          state.current.conversations = remaining;
+          state.current.activeConversationId = nextId;
+          setConversations(remaining);
+          if (activeDropped) {
+            setActiveConversationId(nextId);
+            setMessages(initialRef.current ? [initialRef.current] : []);
+          }
+          cache(remaining);
+          try { localStorage.setItem(HISTORY_ACTIVE_KEY, nextId); } catch { /* Optional cache. */ }
+        }
+        if (!hadTransientError && mounted.current && generation.current === currentGeneration) if (cloudAvailable.current) setNotice(null);
       } catch {
         if (mounted.current && generation.current === currentGeneration) setNotice("ยังซิงก์แชตขึ้นคลาวด์ไม่ได้นะ เซฟไว้ในเครื่องนี้ให้ก่อน เดี๋ยวลองส่งให้อีกที");
       }
     };
     saving.current = work();
     try { await saving.current; } finally { saving.current = null; }
-  }, [cache, setNotice]);
+  }, [cache, setActiveConversationId, setConversations, setMessages, setNotice]);
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
     if (paused.current || refreshing.current || (state.current.ready && state.current.busy)) return;
     refreshing.current = true;
@@ -96,7 +128,10 @@ export function useConversationHistory(initial: HistoryMessage | null, pendingTe
         conversation.messages.forEach((message) => acknowledged.current.add(message.id!));
       }
       const ids = new Set(cloud.map((item) => item.id));
-      const local = state.current.conversations.filter((item) => (!item.cloud && !known.current.has(item.id)) || ids.has(item.id) || item.messages.some((message) => !message.synced && !acknowledged.current.has(message.id!)));
+      for (const id of Array.from(known.current)) {
+        if (!ids.has(id)) known.current.delete(id);
+      }
+      const local = state.current.conversations.filter((item) => (!item.cloud && !known.current.has(item.id)) || ids.has(item.id));
       const merged = mergeHistory(cloud, local);
       setConversations(merged);
       // A pristine device can restore the latest cloud thread after its local

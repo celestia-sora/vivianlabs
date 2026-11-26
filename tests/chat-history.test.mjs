@@ -92,10 +92,12 @@ test("cloud loader follows conversation and message cursors past the first page"
   assert.equal(result[0].messages[0].timestamp, "2000-01-01T00:00:00.000Z");
   assert.equal(result[0].cloud, true); assert.equal(result[0].messages[0].synced, true); assert.equal(calls.length, 4);
 });
-test("unavailable cloud data and failed writes throw instead of claiming successful sync", async () => {
+test("unavailable cloud data and failed writes throw with HTTP status instead of claiming successful sync", async () => {
   const client = load("../lib/chat-history-client.ts", { "@/lib/auth/fetch": { authFetch: async () => Response.json({ error: "Unavailable" }, { status: 503 }) } });
-  await assert.rejects(client.fetchHistory(), /Unavailable/);
-  await assert.rejects(client.appendHistory({ id, title: "Title" }, [msg], true), /Unavailable/);
+  await assert.rejects(client.fetchHistory(), (err) => err instanceof client.HistoryRequestError && err.status === 503 && /Unavailable/.test(err.message));
+  await assert.rejects(client.appendHistory({ id, title: "Title" }, [msg], true), (err) => err instanceof client.HistoryRequestError && err.status === 503 && /Unavailable/.test(err.message));
+  const conflictClient = load("../lib/chat-history-client.ts", { "@/lib/auth/fetch": { authFetch: async () => Response.json({ error: "Conversation no longer exists." }, { status: 409 }) } });
+  await assert.rejects(conflictClient.appendHistory({ id, title: "Title" }, [msg], false), (err) => err instanceof conflictClient.HistoryRequestError && err.status === 409);
 });
 test("history route rejects signed-out requests before body parsing or database access and scopes calls by user.id", async () => {
   const denied = Response.json({ code: "AUTH_REQUIRED" }, { status: 401 });
