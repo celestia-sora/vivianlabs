@@ -8,6 +8,11 @@ export async function GET(request: Request) {
   if (denied) return denied;
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL)?.trim();
   const publishableKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)?.trim();
-  if (!url || !publishableKey) return Response.json({ error: "Realtime is not configured" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
-  return Response.json({ url, publishableKey }, { headers: { "Cache-Control": "private, no-store" } });
+  if (!url || !publishableKey) {
+    return Response.json(
+      { configured: false, url: null, publishableKey: null },
+      { status: 200, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+  return Response.json({ configured: true, url, publishableKey }, { headers: { "Cache-Control": "private, no-store" } });
 }

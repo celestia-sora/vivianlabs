@@ -34,6 +34,26 @@ export async function sceneRequest<T>(path: string, options?: RequestInit): Prom
   if (options?.method && options.method !== "GET") notifyStorageChanged();
   return data as T;
 }
+const SCENE_TOKEN_REFRESH_BUFFER_MS = 60_000;
+
+export function hasFreshSceneToken(rawUrl: unknown, now = Date.now()): boolean {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) return false;
+  if (!rawUrl.startsWith("/api/scenes/")) return true;
+  try {
+    const parsed = new URL(rawUrl, "https://vivian.local");
+    const token = parsed.searchParams.get("token")?.trim();
+    if (!token) return false;
+    const dot = token.indexOf(".");
+    if (dot <= 0) return false;
+    const payloadB64 = token.slice(0, dot).replaceAll("-", "+").replaceAll("_", "/");
+    const padded = payloadB64 + "=".repeat((4 - (payloadB64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
+    return typeof payload.exp === "number" && Number.isFinite(payload.exp) && payload.exp > now + SCENE_TOKEN_REFRESH_BUFFER_MS;
+  } catch {
+    return false;
+  }
+}
+
 const defaults: ScenePreferences = { autoScene: false, activeSceneId: null, preset: null, revision: "" };
 const noPresetImages: string[] = [];
 export function useSceneLibrary(presetImages: string[] = noPresetImages, accountId = "default", backgroundReady = true) {
@@ -67,8 +87,16 @@ export function useSceneLibrary(presetImages: string[] = noPresetImages, account
       try {
         const saved = JSON.parse(localStorage.getItem(cacheKey) ?? "null");
         if (saved && Array.isArray(saved.scenes) && saved.preferences && typeof saved.preferences.autoScene === "boolean") {
-          scenesRef.current = saved.scenes; preferencesRef.current = saved.preferences;
-          setScenes(saved.scenes); setPreferences(saved.preferences); setReady(true);
+          const freshScenes = (saved.scenes as VivianScene[]).filter(
+            (scene) => hasFreshSceneToken(scene?.imageUrl) && hasFreshSceneToken(scene?.thumbnailUrl),
+          );
+          preferencesRef.current = saved.preferences;
+          setPreferences(saved.preferences);
+          if (freshScenes.length > 0 || saved.scenes.length === 0) {
+            scenesRef.current = freshScenes;
+            setScenes(freshScenes);
+            setReady(true);
+          }
         }
       } catch { /* Optional metadata cache. */ }
       void refresh().catch((error: Error) => { if (mounted.current) setNotice(error.message); });
@@ -81,7 +109,7 @@ export function useSceneLibrary(presetImages: string[] = noPresetImages, account
     const active = scenes.find((scene) => scene.id === preferences.activeSceneId);
     const index = scenes.findIndex((scene) => scene.id === preferences.activeSceneId);
     const upcoming = [...scenes.slice(index + 1), ...scenes.slice(0, Math.max(0, index))].slice(0, 2);
-    const urls = [...(active ? [active.imageUrl] : []), ...presetImages, ...upcoming.map((scene) => scene.imageUrl)];
+    const urls = [...(active ? [active.imageUrl] : []), ...presetImages, ...upcoming.map((scene) => scene.imageUrl)].filter((url) => hasFreshSceneToken(url));
     void preloadSceneLibrary(urls, abort.signal);
     return () => { abort.abort(); };
   }, [scenes, preferences.activeSceneId, presetImages, backgroundReady]);
