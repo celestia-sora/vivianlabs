@@ -1,5 +1,5 @@
 /**
- * Browser client for ElevenLabs Scribe v2 Realtime.
+ * Browser client for ElevenLabs Scribe v3 Live.
  *
  * - Authenticates with a single-use token minted by `/api/stt/token`.
  * - Streams 16 kHz PCM16, buffering until the socket opens.
@@ -42,7 +42,7 @@ export interface ScribeClientOptions {
 
 export function buildScribeUrl(token: string, language?: string): string {
   const params = new URLSearchParams({
-    model_id: "scribe_v2_realtime",
+    model_id: "scribe_v3_live",
     token,
     audio_format: "pcm_16000",
     commit_strategy: "manual",

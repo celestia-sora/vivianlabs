@@ -217,7 +217,7 @@ const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 
 test("Scribe URL carries token, manual commit and timestamps", () => {
   const u = new URL(buildScribeUrl("tok", "th"));
-  assert.equal(u.searchParams.get("model_id"), "scribe_v2_realtime");
+  assert.equal(u.searchParams.get("model_id"), "scribe_v3_live");
   assert.equal(u.searchParams.get("include_timestamps"), "true");
   assert.equal(u.searchParams.get("language_code"), "th");
   assert.equal(buildScribeUrl("t", "xx").includes("language_code"), false);

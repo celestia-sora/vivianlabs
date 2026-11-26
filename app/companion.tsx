@@ -274,7 +274,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   const [ttsSync] = useState(() => new TtsSyncController());
   const [ttsTracker] = useState(() => new TtsAlignmentTracker());
   const kineticLoopRef = useRef<number | null>(null);
-  // Kinetic Center Build (user side): live Scribe v2 Realtime transcript. Separate controller and no shared clock.
+  // Kinetic Center Build (user side): live Scribe v3 Live transcript. Separate controller and no shared clock.
   const [userKinetic] = useState(() => new KineticStore());
   const [sttSync] = useState(() => new SttSyncController());
   const scribeRef = useRef<ScribeRealtimeClient | null>(null);
@@ -1672,7 +1672,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     sttSync.reset();
     userKinetic.clear();
   }
-  /** Streams the live microphone to Scribe v2 Realtime; any failure leaves the batch STT path in charge. */
+  /** Streams the live microphone to Scribe v3 Live; any failure leaves the batch STT path in charge. */
   function startRealtimeStt(stream: MediaStream, generation: number) {
     clearUserKinetic();
     sttSync.setLanguage(speechLanguageRef.current);

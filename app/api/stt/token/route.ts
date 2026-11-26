@@ -8,7 +8,7 @@ const TOKEN_URL = "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe
 
 /**
  * Mints a short-lived, single-use ElevenLabs token so the browser can open the
- * Scribe v2 Realtime WebSocket without ever seeing the API key.
+ * Scribe v3 Live WebSocket without ever seeing the API key.
  */
 export async function POST(request: Request): Promise<Response> {
   const denied = await requireApiAccess(request);
