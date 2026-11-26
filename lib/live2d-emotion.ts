@@ -42,8 +42,10 @@ const TEXT_RULES: EmotionRule[] = [
 const TAG_TO_EMOTION: Record<string, Live2DEmotion> = {
   curious: "confused", playful: "tease", thoughtful: "thinking", content: "happy",
   anxious: "sad", tired: "tired", startled: "surprised", sad: "sad", excited: "happy",
-  happy: "happy", laughs: "laugh", chuckles: "laugh", sighs: "tired", exhales: "tired",
-  whispers: "calm", softly: "calm", quietly: "calm", shouts: "angry", rushed: "surprised",
+  happy: "happy", laughs: "laugh", laughing: "laugh", chuckles: "laugh", giggles: "laugh",
+  sighs: "tired", exhales: "tired", gasps: "surprised",
+  whispers: "calm", whispering: "calm", softly: "calm", quietly: "calm",
+  shouts: "angry", shouting: "angry", rushed: "surprised",
   weak: "tired", angry: "angry", bored: "tired", menacing: "angry", amazed: "surprised",
   powerful: "angry", proud: "happy", optimistic: "happy", mad: "angry", aggressive: "angry",
   bitter: "angry", critical: "angry", repelled: "angry", stressed: "sad", scared: "sad",
