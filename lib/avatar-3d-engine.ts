@@ -27,10 +27,23 @@ import type { ThreeAvatarModules } from "@/lib/model-runtime-3d";
 import { faceCrop, snapshotToBlob } from "@/lib/model-snapshot";
 import { isSystemExpressionName, isVrmaPath } from "@/lib/vrm-metadata";
 import {
+  Avatar3DPhysicsController,
+  type PhysicsRuntimeStats,
+} from "@/lib/avatar-3d-physics";
+import {
+  getSemanticPoseDefinition,
+  resolveSemanticPose,
+  type MotionPriority,
+  type ResolvedSemanticPose,
+  type SemanticMotionIntent,
+} from "@/lib/avatar-3d-poses";
+import {
   applyVrmFullBodyMocap,
   BUILT_IN_VRM_GESTURES,
-  BUILT_IN_VRM_MOCAP_GROUP,
   emotionToBuiltInGesture,
+  getPoseGazeOffset,
+  isBuiltInVrmMotionGroup,
+  resetVrmMocapSmoothing,
   type VrmGestureId,
   type VrmMocapState,
 } from "@/lib/vrm-procedural-mocap";
@@ -64,6 +77,7 @@ export interface Avatar3DRuntimeInfo {
   motions: ModelMotion[];
   vertexCount?: number;
   drawCalls?: number;
+  physics?: PhysicsRuntimeStats;
 }
 
 interface MorphBinding {
@@ -110,6 +124,7 @@ interface LoadedAvatar {
   mouthMorphNames: string[];
   blinkMorphNames: string[];
   fbxRig?: FbxBoneRig;
+  animatedNodeNames?: Set<string>;
   hipsRestPos?: { x: number; y: number; z: number } | null;
   headWorldY: number;
   avatarHeight: number;
@@ -396,6 +411,7 @@ export class Avatar3DStage {
   private readonly _tmpWorldDelta: ThreeTypes.Quaternion;
   private readonly _tmpTargetWorld: ThreeTypes.Quaternion;
   private readonly _desiredExprs = new Map<string, number>();
+  private readonly physics: Avatar3DPhysicsController;
 
   // Look-at target (normalized screen coordinates [-1, 1])
   private pointerTargetX = 0;
@@ -419,8 +435,12 @@ export class Avatar3DStage {
   private reactionIntensity = 1;
   private activeVrmGesture: VrmGestureId | null = null;
   private activeVrmGestureExpireAt: number | null = null;
+  private activeVrmGesturePriority: MotionPriority | null = null;
+  private activeVrmGestureIntensity = 1.0;
   private vrmGestureWeight = 0;
   private vrmGestureStartedAt = 0;
+  private poseGazeSmoothX = 0;
+  private poseGazeSmoothY = 0;
   private readonly _mocapState: VrmMocapState = {
     elapsedSec: 0,
     dt: 0.016,
@@ -458,6 +478,7 @@ export class Avatar3DStage {
     this._tmpEuler = new THREE.Euler(0, 0, 0, "YXZ");
     this._tmpWorldDelta = new THREE.Quaternion();
     this._tmpTargetWorld = new THREE.Quaternion();
+    this.physics = new Avatar3DPhysicsController(modules);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -822,6 +843,11 @@ export class Avatar3DStage {
     this.pointerLastMovedAt = performance.now();
   }
 
+  /** Apply a bounded interactive physics impulse (e.g. tap/brush gust) to hair & clothing. */
+  applyPhysicsImpulse(ix: number, iy: number, iz = 0): void {
+    this.physics.addImpulse(ix, iy, iz);
+  }
+
   setMouthOpen(value: number): void {
     this.mouthTarget = clamp(value, 0, 1);
   }
@@ -848,6 +874,70 @@ export class Avatar3DStage {
     this.reactionEmotion = null;
     this.activeVrmGesture = null;
     this.activeVrmGestureExpireAt = null;
+    this.activeVrmGesturePriority = null;
+    this.activeVrmGestureIntensity = 1.0;
+  }
+
+  /** Reset motion controller back to relaxed_idle cleanly (priority 1 safety reset). */
+  resetMotionController(): void {
+    this.clearReaction();
+    if (this.avatar?.activeAction) {
+      this.avatar.activeAction.fadeOut(0.3);
+      this.avatar.activeAction = null;
+    }
+    if (this.avatar) {
+      this.avatar.activeMotionKey = null;
+      if (this.avatar.vrm) resetVrmMocapSmoothing(this.avatar.vrm);
+    }
+  }
+
+  /**
+   * Resolve and activate a semantic 24-pose motion intent with priority rules,
+   * prop-safe fallbacks, and synchronized facial expression + gaze.
+   */
+  setSemanticPose(intent: SemanticMotionIntent): ResolvedSemanticPose {
+    const resolved = resolveSemanticPose(intent, {
+      hasSeatProp: false,
+      hasPhoneProp: false,
+      activePoseId: this.activeVrmGesture,
+      activePriority: this.activeVrmGesturePriority,
+    });
+    if (!resolved.accepted || !this.avatar) return resolved;
+
+    if (this.avatar.activeAction) {
+      this.avatar.activeAction.fadeOut(0.35);
+      this.avatar.activeAction = null;
+    }
+
+    if (resolved.resolvedId === "relaxed_idle") {
+      this.activeVrmGesture = null;
+      this.activeVrmGestureExpireAt = null;
+      this.activeVrmGesturePriority = null;
+      this.activeVrmGestureIntensity = 1.0;
+      if (!this.savedExpressions.length) {
+        this.activeEmotion = null;
+        this.activeEmotionExpression = null;
+      }
+      return resolved;
+    }
+
+    this.activeVrmGesture = resolved.resolvedId;
+    this.activeVrmGesturePriority = resolved.priority;
+    this.activeVrmGestureIntensity = resolved.intensity;
+    this.vrmGestureStartedAt = this.elapsedSec;
+    this.activeVrmGestureExpireAt =
+      resolved.durationSec !== null ? this.elapsedSec + resolved.durationSec : null;
+
+    // Synchronize facial expression with the semantic pose when user hasn't pinned custom expressions
+    if (resolved.emotion && !this.savedExpressions.length && this.avatar.format === "vrm") {
+      this.activeEmotion = resolved.emotion;
+      this.activeEmotionExpression = resolve3DExpression(resolved.emotion, this.avatar.expressions);
+    } else if (!resolved.emotion && !this.savedExpressions.length && intent.priority === 2) {
+      this.activeEmotion = null;
+      this.activeEmotionExpression = null;
+    }
+
+    return resolved;
   }
 
   /**
@@ -875,9 +965,18 @@ export class Avatar3DStage {
     this.reactionDuration = pose.durationSec;
     this.reactionIntensity = intensity >= 70 ? 1.25 : 0.95;
 
+    // Subtle secondary-physics kick matching emotional beat so hair/ribbons follow through naturally
+    if (emotion === "happy" || emotion === "laugh" || emotion === "surprised") {
+      this.physics.addImpulse(0, 0.16 * this.reactionIntensity, 0.08);
+    } else if (emotion === "angry" || emotion === "tease") {
+      this.physics.addImpulse((pose.headYaw >= 0 ? -0.18 : 0.18) * this.reactionIntensity, 0.04, 0.05);
+    } else if (emotion === "blush" || emotion === "love") {
+      this.physics.addImpulse(0.08, 0.04, 0.06);
+    }
+
     let appliedMotion: string | null = null;
     // Prefer external .vrma/.fbx clips if the model ships with a matching clip
-    const externalMotions = this.avatar.motionList.filter((m) => m.group !== BUILT_IN_VRM_MOCAP_GROUP);
+    const externalMotions = this.avatar.motionList.filter((m) => !isBuiltInVrmMotionGroup(m.group));
     const clipNames = externalMotions.map((m) => m.name);
     const matched = resolve3DMotion(emotion, clipNames);
     if (matched) {
@@ -887,15 +986,16 @@ export class Avatar3DStage {
         appliedMotion = motion.name;
       }
     } else if (this.avatar.format === "vrm" && !this.avatar.activeAction) {
-      // Trigger built-in full-body VRM mocap gesture matching Vivian's emotion
+      // Trigger semantic full-body VRM pose matching Vivian's emotion
       const gestureId = emotionToBuiltInGesture(emotion);
       if (gestureId) {
-        const gestureDef = BUILT_IN_VRM_GESTURES.find((g) => g.id === gestureId);
-        if (gestureDef) {
-          this.activeVrmGesture = gestureDef.id;
-          this.vrmGestureStartedAt = this.elapsedSec;
-          this.activeVrmGestureExpireAt = this.elapsedSec + gestureDef.durationSec;
-          appliedMotion = gestureDef.label;
+        const resolved = this.setSemanticPose({
+          pose_id: gestureId,
+          emotion_id: emotion,
+          intensity: intensity / 65,
+        });
+        if (resolved.accepted) {
+          appliedMotion = resolved.definition.labelTh;
         }
       }
     }
@@ -908,26 +1008,31 @@ export class Avatar3DStage {
     const { mixer, clips } = this.avatar;
     if (!motion) {
       if (this.avatar.activeAction) {
-        this.avatar.activeAction.fadeOut(0.25);
+        this.avatar.activeAction.fadeOut(0.35);
         this.avatar.activeAction = null;
       }
       this.avatar.activeMotionKey = null;
       this.activeVrmGesture = null;
       this.activeVrmGestureExpireAt = null;
+      this.activeVrmGesturePriority = null;
+      this.activeVrmGestureIntensity = 1.0;
+      if (!this.savedExpressions.length) {
+        this.activeEmotion = null;
+        this.activeEmotionExpression = null;
+      }
       return true;
     }
 
-    // Handle built-in full-body VRM procedural mocap gestures
-    if (motion.group === BUILT_IN_VRM_MOCAP_GROUP) {
-      const gestureDef = BUILT_IN_VRM_GESTURES[motion.index] ?? BUILT_IN_VRM_GESTURES.find((g) => g.label === motion.name);
+    // Handle built-in semantic 24-pose library gestures (grouped by category)
+    if (isBuiltInVrmMotionGroup(motion.group)) {
+      const groupGestures = BUILT_IN_VRM_GESTURES.filter((g) => g.group === motion.group);
+      const gestureDef = groupGestures[motion.index] ?? BUILT_IN_VRM_GESTURES.find((g) => g.label === motion.name);
       if (!gestureDef) return false;
-      if (this.avatar.activeAction) {
-        this.avatar.activeAction.fadeOut(0.25);
-        this.avatar.activeAction = null;
-      }
-      this.activeVrmGesture = gestureDef.id;
-      this.vrmGestureStartedAt = this.elapsedSec;
-      this.activeVrmGestureExpireAt = options?.loopOnce ? this.elapsedSec + gestureDef.durationSec : null;
+      this.setSemanticPose({
+        pose_id: gestureDef.id,
+        priority: 2,
+        duration: options?.loopOnce ? gestureDef.durationSec : null,
+      });
       this.avatar.activeMotionKey = `${motion.group}:${motion.index}`;
       return true;
     }
@@ -948,10 +1053,10 @@ export class Avatar3DStage {
     } else {
       nextAction.setLoop(this.THREE.LoopRepeat, Infinity);
     }
-    nextAction.fadeIn(0.25).play();
+    nextAction.fadeIn(0.35).play();
 
     if (this.avatar.activeAction && this.avatar.activeAction !== nextAction) {
-      this.avatar.activeAction.fadeOut(0.25);
+      this.avatar.activeAction.fadeOut(0.35);
     }
     this.avatar.activeAction = nextAction;
     this.avatar.activeMotionKey = key;
@@ -1021,6 +1126,12 @@ export class Avatar3DStage {
     this.activeVrmGestureExpireAt = null;
     this.vrmGestureWeight = 0;
 
+    if (loaded.format === "vrm" && loaded.vrm) {
+      this.physics.attachVrm(loaded.vrm, loaded.root);
+    } else {
+      this.physics.attachFbx(loaded.content, loaded.root, loaded.animatedNodeNames);
+    }
+
     if (previous) {
       this.scene.remove(previous.root);
       previous.dispose();
@@ -1036,10 +1147,12 @@ export class Avatar3DStage {
       motions: [...loaded.motionList],
       vertexCount: loaded.vertexCount,
       drawCalls: loaded.drawCalls,
+      physics: this.physics.getStats(),
     };
   }
 
   unloadAvatar(): void {
+    this.physics.clear();
     if (!this.avatar) return;
     this.scene.remove(this.avatar.root);
     this.avatar.dispose();
@@ -1090,11 +1203,15 @@ export class Avatar3DStage {
       vrm.lookAt.target = lookAtTarget;
     }
 
-    // Discover expressions (exclude lip-sync / blink / lookAt channels)
+    // Discover working expressions (exclude lip-sync / blink / lookAt / neutral / zero-bind placeholders)
     const expressions: string[] = [];
     for (const expr of vrm.expressionManager?.expressions ?? []) {
       const name = expr.expressionName;
-      if (name && !isSystemExpressionName(name) && !expressions.includes(name)) {
+      if (!name || name.trim().toLowerCase() === "neutral" || isSystemExpressionName(name)) continue;
+      const binds = (expr as unknown as { _binds?: unknown[]; binds?: unknown[] })._binds
+        ?? (expr as unknown as { binds?: unknown[] }).binds;
+      if (Array.isArray(binds) && binds.length === 0) continue;
+      if (!expressions.includes(name)) {
         expressions.push(name);
       }
     }
@@ -1110,9 +1227,12 @@ export class Avatar3DStage {
     const clips = new Map<string, ThreeTypes.AnimationClip>();
     const motionList: ModelMotion[] = [];
 
-    // Register built-in full-body procedural mocap gestures (work on every VRM out of the box)
-    for (const [index, gesture] of BUILT_IN_VRM_GESTURES.entries()) {
-      motionList.push({ group: BUILT_IN_VRM_MOCAP_GROUP, index, name: gesture.label });
+    // Register built-in semantic mocap gestures grouped by category (work on every VRM out of the box)
+    const groupCounts = new Map<string, number>();
+    for (const gesture of BUILT_IN_VRM_GESTURES) {
+      const idx = groupCounts.get(gesture.group) ?? 0;
+      groupCounts.set(gesture.group, idx + 1);
+      motionList.push({ group: gesture.group, index: idx, name: gesture.label });
     }
 
     if (resources.companionMotionUrls.length) {
@@ -1175,7 +1295,9 @@ export class Avatar3DStage {
     this._mocapState.reactHeadYaw = 0;
     this._mocapState.reactHeadRoll = 0;
     this._mocapState.reactSpinePitch = 0;
+    this._mocapState.snapImmediate = true;
     applyVrmFullBodyMocap(vrm, this._mocapState);
+    this._mocapState.snapImmediate = false;
     vrm.update(0.016);
     const stats = this.countAvatarStats(content);
 
@@ -1466,6 +1588,14 @@ export class Avatar3DStage {
 
     const stats = this.countAvatarStats(fbx);
 
+    const animatedNodeNames = new Set<string>();
+    for (const clip of clips.values()) {
+      for (const track of clip.tracks) {
+        const dot = track.name.indexOf(".");
+        if (dot > 0) animatedNodeNames.add(track.name.slice(0, dot));
+      }
+    }
+
     return {
       format: "fbx",
       root,
@@ -1480,6 +1610,7 @@ export class Avatar3DStage {
       mouthMorphNames,
       blinkMorphNames,
       fbxRig,
+      animatedNodeNames,
       headWorldY,
       avatarHeight,
       vertexCount: stats.vertexCount,
@@ -1711,11 +1842,13 @@ export class Avatar3DStage {
     const gestureActive = this.activeVrmGesture !== null
       && (this.activeVrmGestureExpireAt === null || this.elapsedSec < this.activeVrmGestureExpireAt);
     const weightTarget = gestureActive ? 1 : 0;
-    this.vrmGestureWeight = damp(this.vrmGestureWeight, weightTarget, gestureActive ? 6.5 : 4.5, dt);
+    this.vrmGestureWeight = damp(this.vrmGestureWeight, weightTarget, gestureActive ? 5.2 : 3.6, dt);
     if (!gestureActive && this.vrmGestureWeight < 0.005) {
       this.vrmGestureWeight = 0;
       this.activeVrmGesture = null;
       this.activeVrmGestureExpireAt = null;
+      this.activeVrmGesturePriority = null;
+      this.activeVrmGestureIntensity = 1.0;
     }
 
     // Procedural emotion reaction envelope (smooth ease in & out)
@@ -1748,10 +1881,12 @@ export class Avatar3DStage {
     s.gestureId = this.activeVrmGesture;
     s.gestureWeight = this.vrmGestureWeight;
     s.gestureAgeSec = Math.max(0, this.elapsedSec - this.vrmGestureStartedAt);
+    s.gestureIntensity = this.activeVrmGestureIntensity;
     s.reactHeadPitch = reactHeadPitch;
     s.reactHeadYaw = reactHeadYaw;
     s.reactHeadRoll = reactHeadRoll;
     s.reactSpinePitch = reactSpinePitch;
+    s.snapImmediate = false;
 
     applyVrmFullBodyMocap(vrm, s);
   }
@@ -1863,10 +1998,23 @@ export class Avatar3DStage {
     this.mouthCurrent = damp(this.mouthCurrent, this.mouthTarget, this.mouthTarget > this.mouthCurrent ? 28 : 16, dt);
     const blinkValue = this.updateBlink(dt);
 
-    // Update lookAt world target
+    // Smooth pose-driven gaze offset (gaze-first behavior for thinking, shy, looking_around, pointing)
+    const activePoseDef = this.activeVrmGesture ? getSemanticPoseDefinition(this.activeVrmGesture) : null;
+    const poseGaze = activePoseDef
+      ? getPoseGazeOffset(
+          activePoseDef.gazeMode,
+          this.elapsedSec,
+          Math.max(0, this.elapsedSec - this.vrmGestureStartedAt),
+          this.vrmGestureWeight,
+        )
+      : { x: 0, y: 0 };
+    this.poseGazeSmoothX = damp(this.poseGazeSmoothX, poseGaze.x, 7.5, dt);
+    this.poseGazeSmoothY = damp(this.poseGazeSmoothY, poseGaze.y, 7.5, dt);
+
+    // Update lookAt world target (pointer + synchronized pose gaze)
     avatar.lookAtTarget.position.set(
-      this.pointerSmoothX * 0.9,
-      avatar.headWorldY + this.pointerSmoothY * 0.5,
+      (this.pointerSmoothX * 0.65 + this.poseGazeSmoothX) * 0.9,
+      avatar.headWorldY + (this.pointerSmoothY * 0.65 + this.poseGazeSmoothY) * 0.5,
       2.2,
     );
 
@@ -1878,14 +2026,6 @@ export class Avatar3DStage {
       const vrm = avatar.vrm;
       if (!avatar.activeAction) {
         this.updateVrmFullBodyMocap(vrm, avatar, dt);
-      }
-
-      // Apply subtle breeze to VRM SpringBones so hair & clothing sway gently
-      if (vrm.springBoneManager) {
-        const windX = Math.sin(this.elapsedSec * 0.9) * 0.05 + Math.sin(this.elapsedSec * 2.1) * 0.025;
-        for (const joint of vrm.springBoneManager.joints) {
-          joint.settings.gravityDir.set(windX, -1, 0.04).normalize();
-        }
       }
 
       // Smoothly blend facial expressions + blink + lip-sync
@@ -1901,7 +2041,8 @@ export class Avatar3DStage {
         for (const [name, target] of desired) {
           const prev = this.expressionWeights.get(name) ?? 0;
           if (prev === 0 && target === 0) continue;
-          const rawNext = damp(prev, target, 10, dt);
+          const rate = target > prev ? 7.5 : 4.2;
+          const rawNext = damp(prev, target, rate, dt);
           const next = rawNext < 0.0005 && target === 0 ? 0 : rawNext;
           this.expressionWeights.set(name, next);
           mgr.setValue(name, next);
@@ -1917,12 +2058,13 @@ export class Avatar3DStage {
         mgr.setValue("oh", clamp(open * 0.28 * (0.5 + 0.5 * Math.cos(this.elapsedSec * 11)), 0, 0.45));
       }
 
-      vrm.update(dt);
+      this.physics.updateVrm(vrm, avatar.root, this.elapsedSec, dt);
     } else {
-      // FBX procedural pose + morph targets + jaw fallback
+      // FBX procedural pose + secondary Verlet physics + morph targets + jaw fallback
       if (!avatar.activeAction && avatar.fbxRig) {
         this.applyFbxProceduralPose(avatar.fbxRig, this.elapsedSec);
       }
+      this.physics.updateFbx(avatar.root, this.elapsedSec, dt);
 
       if (avatar.expressions.length || this.savedExpressions.length || Object.keys(this.activeFbxEmotionWeights).length) {
         const desired = this._desiredExprs;
@@ -1936,7 +2078,8 @@ export class Avatar3DStage {
         for (const [name, target] of desired) {
           const prev = this.expressionWeights.get(name) ?? 0;
           if (prev === 0 && target === 0) continue;
-          const rawNext = damp(prev, target, 10, dt);
+          const rate = target > prev ? 7.5 : 4.2;
+          const rawNext = damp(prev, target, rate, dt);
           const next = rawNext < 0.0005 && target === 0 ? 0 : rawNext;
           this.expressionWeights.set(name, next);
           const bindings = avatar.morphBindings.get(name);

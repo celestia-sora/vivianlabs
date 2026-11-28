@@ -271,8 +271,16 @@ img.conversation-avatar { display: block; width: 38px; height: 38px; object-fit:
 .settings-back:hover { background: #e0d6ff; }
 .settings-back-label { font-size: 13px; }
 /* One fixed window footprint for every panel (the previous Settings size). */
-.floating-workspace.menu-window { top: 50%; left: 50%; width: min(836px, calc(100vw - 48px)); height: min(752px, calc(100dvh - 48px)); max-width: none; max-height: none; align-items: stretch; gap: 0; transform: translate(-50%, calc(-50% + 12px)) scale(.98); transform-origin: center; }
+.floating-workspace.menu-window { top: 50%; left: 50%; width: min(836px, calc(100vw - 48px)); height: min(752px, calc(100dvh - 48px)); max-width: none; max-height: none; align-items: stretch; gap: 0; transform: translate(-50%, calc(-50% + 12px)) scale(.98); transform-origin: center; transition: left .28s cubic-bezier(.2,.8,.2,1), top .28s cubic-bezier(.2,.8,.2,1), width .28s cubic-bezier(.2,.8,.2,1), height .28s cubic-bezier(.2,.8,.2,1), transform .34s cubic-bezier(.2,.8,.2,1), opacity .24s ease; }
 .floating-overlay.is-visible .floating-workspace.menu-window { transform: translate(-50%, -50%) scale(1); }
+/* Live-preview mode for Character Expression & Motion tabs: clear stage + side drawer / mobile bottom sheet */
+.floating-overlay.is-live-preview { pointer-events: none; }
+.floating-overlay.is-live-preview .floating-scrim { opacity: 0; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+.floating-overlay.is-live-preview .floating-workspace.menu-window { pointer-events: auto; left: 20px; top: 50%; width: min(360px, calc(38vw)); height: min(680px, calc(100dvh - 48px)); transform: translate(0, -50%) scale(1); }
+.floating-overlay.is-live-preview .floating-panel { background: rgb(255 255 255 / .72); -webkit-backdrop-filter: blur(22px) saturate(125%); backdrop-filter: blur(22px) saturate(125%); }
+.floating-overlay.is-live-preview .expression-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.live-preview-badge { margin-left: auto; margin-right: 6px; padding: 3px 9px; border-radius: 999px; background: linear-gradient(135deg, #e7dcff, #f6d9ee); color: #543878; font: 600 11px system-ui, sans-serif; letter-spacing: .02em; white-space: nowrap; }
+.floating-overlay.is-live-preview .floating-panel-head > button:last-child { margin-left: 0; }
 .menu-window .floating-panel { flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; max-height: none; }
 .menu-window .settings-back { display: inline-flex; }
 .floating-menu-list { display: grid; gap: 7px; margin-top: 10px; }
@@ -337,6 +345,9 @@ img.conversation-avatar { display: block; width: 38px; height: 38px; object-fit:
   .menu-window .floating-panel-head > div { flex: 1; margin-left: 42px; text-align: left; }
   .menu-window .floating-panel-head > button:last-child { margin-left: 8px; flex: 0 0 28px; }
   .menu-window .floating-panel-body { padding: 18px max(18px, env(safe-area-inset-left)) max(28px, env(safe-area-inset-bottom)); }
+  .floating-overlay.is-live-preview .menu-window, .floating-overlay.is-visible.is-live-preview .floating-workspace.menu-window { top: auto; bottom: 0; left: 0; right: 0; width: 100%; height: min(44dvh, 390px); transform: none; }
+  .floating-overlay.is-live-preview .menu-window .floating-panel { border-radius: 24px 24px 0 0; border-top: 1px solid #24132922; padding-top: 0; box-shadow: 0 -14px 40px rgba(36, 19, 41, .16); }
+  .floating-overlay.is-live-preview .menu-window .floating-panel-head { min-height: 54px; padding: 10px 14px 10px max(8px, env(safe-area-inset-left)); }
 }
 @media (prefers-reduced-motion: reduce) { .floating-workspace, .floating-scrim, .floating-overlay { transition-duration: .01ms; } }
 @media (prefers-reduced-motion: reduce) { .speech-transition, .speech-preview, .thinking-dots i { animation: none; } }

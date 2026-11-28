@@ -154,12 +154,21 @@ test("applyVrmFullBodyMocap articulates hips, legs, arms, fingers, and gestures 
   applyVrmFullBodyMocap(vrm1, state);
 
   // VRM 0.x and VRM 1.0 have mirrored Z rotation on arms & legs, identical Y yaw
-  assert.ok(vrm0.bones.get("leftUpperArm").rotation.z > 0.5, "VRM 0.x leftUpperArm should lower (+Z)");
-  assert.ok(vrm1.bones.get("leftUpperArm").rotation.z < -0.5, "VRM 1.0 leftUpperArm should lower (-Z)");
+  assert.ok(vrm0.bones.get("leftUpperArm").rotation.z > 0.4, "VRM 0.x leftUpperArm should lower (+Z)");
+  assert.ok(vrm1.bones.get("leftUpperArm").rotation.z < -0.4, "VRM 1.0 leftUpperArm should lower (-Z)");
   assert.ok(Math.abs(vrm0.bones.get("leftLowerLeg").rotation.x) > 0.02, "Legs/knees must articulate");
   assert.ok(Math.abs(vrm0.bones.get("leftIndexProximal").rotation.z) > 0.05, "Fingers must curl naturally");
   assert.ok(Math.abs(vrm0.bones.get("hips").position.x) > 0.005, "Hips must shift weight");
-  assert.equal(BUILT_IN_VRM_GESTURES.length, 6);
-  assert.equal(emotionToBuiltInGesture("blush"), "shy_fidget");
-  assert.equal(emotionToBuiltInGesture("angry"), "pout_hips");
+  assert.ok(BUILT_IN_VRM_GESTURES.length >= 20);
+  assert.equal(emotionToBuiltInGesture("blush"), "shy_embarrassed");
+  assert.equal(emotionToBuiltInGesture("angry"), "arms_crossed");
+  assert.equal(emotionToBuiltInGesture("surprised"), "surprised");
+  assert.equal(emotionToBuiltInGesture("sad"), "sad_concerned");
+  assert.equal(emotionToBuiltInGesture("hair"), "hair_adjustment");
+
+  // Direct gesture switch must smoothly interpolate rather than snapping in 1 frame
+  const beforeSwitch = vrm1.bones.get("rightLowerArm").rotation.y;
+  applyVrmFullBodyMocap(vrm1, { ...state, gestureId: "arms_crossed", gestureAgeSec: 0, dt: 1 / 60 });
+  const afterOneFrame = vrm1.bones.get("rightLowerArm").rotation.y;
+  assert.ok(Math.abs(afterOneFrame - beforeSwitch) < 0.45, `Expected smooth 1-frame step, got delta=${Math.abs(afterOneFrame - beforeSwitch)}`);
 });

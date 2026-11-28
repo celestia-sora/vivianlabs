@@ -644,6 +644,11 @@ export function useAvatar3D({
         if (canvasRef.current) {
           if (typeof runtimeInfo.vertexCount === "number") canvasRef.current.dataset.avatarVertices = String(runtimeInfo.vertexCount);
           if (typeof runtimeInfo.drawCalls === "number") canvasRef.current.dataset.avatarDrawCalls = String(runtimeInfo.drawCalls);
+          if (runtimeInfo.physics) {
+            canvasRef.current.dataset.avatarPhysicsMode = runtimeInfo.physics.mode;
+            canvasRef.current.dataset.avatarPhysicsJoints = String(runtimeInfo.physics.jointCount);
+            canvasRef.current.dataset.avatarPhysicsColliders = String(runtimeInfo.physics.colliderCount);
+          }
         }
         setRuntimeModelMeta({ modelId: renderModel.id, expressions: discoveredExpressions, motions: discoveredMotions });
 
@@ -747,7 +752,6 @@ export function useAvatar3D({
     modelsReady,
     activeModel,
     activePackage,
-    cloudLibrary,
     modelReload,
     graphicsLost,
     modelPaused,
@@ -895,7 +899,14 @@ export function useAvatar3D({
         if (wasDrag) persist();
         if (hadPointers && dragMoved < 8 && !pinchStart) {
           const now = Date.now();
-          if (now - lastTapAt < 350) reset();
+          if (now - lastTapAt < 350) {
+            reset();
+          } else {
+            // Subtle tap gust so tapping near Vivian gently rustles hair/ribbons
+            const rect = canvas.getBoundingClientRect();
+            const nx = rect.width ? ((event.clientX - rect.left) / rect.width) * 2 - 1 : 0;
+            stageRef.current?.applyPhysicsImpulse(-nx * 0.22, 0.08, 0.12);
+          }
           lastTapAt = now;
         }
         dragStart = null;
