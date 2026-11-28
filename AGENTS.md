@@ -308,16 +308,23 @@ model.setExpression(null);
 | File | Purpose | Edit Frequency |
 |------|---------|----------------|
 | `app/page.tsx` | Companion shell (client-side token gate) | Low |
-| `app/companion.tsx` | Main UI component (chat + Live2D) | High |
+| `app/companion.tsx` | Main UI component (chat + Dual Live2D & 3D Avatar) | High |
 | `app/login/page.tsx` | Hop shim: consumes `#token=` → forwards to vivianAuth | Low |
 | `app/api/chat/route.ts` | LLM routing logic | High |
 | `app/layout.tsx` | Root layout (Cubism Core loader) | Low |
-| `app/globals.css` | Styling | Medium |
+| `app/globals.css` | Styling (including `.avatar-mode-switch`) | Medium |
+| `lib/use-avatar-3d.tsx` | Self-contained 3D Avatar React hook (IndexedDB, R2 sync, stage lifecycle, zero-leak disposal) | Medium |
+| `lib/avatar-3d-engine.ts` | Three.js + `@pixiv/three-vrm` 3D renderer (VRM 0.x/1.0, VRMA, FBX, Anime/Realistic PBR, lip-sync, eye look-at) | Medium |
+| `lib/vrm-procedural-mocap.ts` | Full-body procedural humanoid mocap (6 poses, idle breathing, emotion gestures) | Medium |
+| `lib/local-models-3d.ts` | 3D IndexedDB catalog (`vivian-local-models-3d`) & package validation (`.vrm`/`.vrma`/`.fbx`/`.zip`) | Low |
+| `lib/cloud-models-3d.ts` | 3D Cloud R2 upload/download helpers (kept separate from Live2D `lib/cloud-models.ts`) | Low |
+| `lib/fast-fbx-loader.js` | O(1) indexed FBX loader & GPU texture/geometry optimization | Low |
 | `lib/auth/` | Bearer verify bridge (`getAuthAccess` / `requireAuthorizedUser` → vivianAuth `/api/verify`) + client `authFetch` | Medium |
 | `lib/user-tiers.ts` | 3-tier capabilities, Bangkok daily quota RPCs, legacy claim, per-user storage helpers | Medium |
 | `lib/tier-requests.ts` | Selected tier request storage, HMAC review tokens, Resend + `mailto:` notifications | Medium |
 | `app/components/tier-panel.tsx` | Tier badges, quota display, Request Selected / Limit Reached modals, Sorachan Admin panel | Medium |
 | `lib/supabase-admin.ts` | Database client | Low |
+| `docs/3d-vrm-fbx-architecture.md` | Dual Live2D + 3D Avatar architecture & invariants | Low |
 | `public/live2d/` | Live2D assets | Low |
 | `package.json` | Dependencies | Low |
 
@@ -493,3 +500,13 @@ This section supersedes older fresh-only JEV and preflight descriptions above. R
 - Kinetic Center Build: ElevenLabs `eleven_v4` streaming TTS with `audio_alignment` timestamps (`/api/tts/stream`) + Scribe v2 Realtime STT (`/api/stt/token`) synced via `components/KineticText.tsx`.
 - Full friendly Gen Z Thai UI copy rewrite across panels/modals/errors, reduced technical jargon, and smoother human-like Gen Z persona tuning in `lib/vivian-persona.ts`, `lib/vivian-story.ts`, and `app/api/chat/route.ts`.
 - Version: vivian 2.6.0.
+
+## Dual Live2D + 3D Avatar System — 2026-11-28
+
+- **Dual-Engine Support (Live2D + 3D):** Keeps Live2D Cubism 4 (`pixi.js@^6.5.10`, `pixi-live2d-display@^0.4.0`, `public/live2d/live2dcubismcore.min.js`, `lib/cloud-models.ts`, and all Live2D tests) 100% intact alongside the 3D Avatar engine (`three@0.187.0`, `@pixiv/three-vrm@3.6.0`, `@pixiv/three-vrm-animation@3.6.0`).
+- **UI Switcher & Persistence:** Added a segmented **`Live2D` | `3D (VRM / FBX)`** switcher (`.avatar-mode-switch`) at the top of the Character (`ตัวละคร`) panel in `app/companion.tsx` and `app/globals.css`. Defaults to `live2d` for new users and persists the selected mode in `localStorage` (`vivian-avatar-mode`).
+- **Zero-Leak Dual WebGL Lifecycle:** Only one WebGL `<canvas>` mounts at a time (`data-avatar-mode="live2d"` vs `"3d"`). Leaving Live2D immediately disposes PixiJS; leaving 3D immediately disposes `Avatar3DStage`, GPU geometries/textures, and Blob URLs inside `lib/use-avatar-3d.tsx` (also resets the crash-loop guard on intentional mode switches and avoids caller `AbortSignal` poisoning shared package hydration).
+- **3D Formats, Procedural Mocap & Lighting:** Supports `.vrm` (0.x & 1.0), `.vrma`, `.fbx`, `.zip`, and folder uploads stored in a separate IndexedDB catalog (`vivian-local-models-3d` via `lib/local-models-3d.ts`) and optional R2 cloud sync (`lib/cloud-models-3d.ts`, `lib/cloud-storage.ts` accepting `.vrm`/`.fbx`/`.model3.json`). Includes full-body procedural humanoid mocap (`lib/vrm-procedural-mocap.ts`: 6 poses, breathing, emotion gestures), Anime / Realistic PBR lighting modes, `FastFBXLoader` (`lib/fast-fbx-loader.js`), 64KB ZIP streaming (`lib/model-zip.ts`), TTS lip-sync, and emotion/expression routing from `/api/chat` and `/expression`.
+- **3D Interaction & Asset Rules:** 3D stage supports drag-to-move, pinch/wheel zoom, and double-tap/reset only (no user 3D orbit/rotation). Never commit user or licensed `.vrm`/`.vrma`/`.fbx`/`.zip` model assets into git.
+- **Docs & Verification:** Added `docs/3d-vrm-fbx-architecture.md`, updated `README.md`, and added `tests/local-models-3d.test.mjs` + `tests/avatar-3d.test.mjs` to `npm run test:models` (81/81 pass alongside `npm run test:storage` 23/23, `tsc --noEmit`, `npm run lint`, `npm run build`, and Chrome WebGL E2E).
+
