@@ -44,7 +44,7 @@ export function modelManifests(value: unknown): CloudModel["manifests"] {
   return value.map((entry: unknown) => {
     if (!entry || typeof entry !== "object") throw new StorageError("Invalid model manifest.");
     const { path, name } = entry as Record<string, unknown>;
-    if (typeof path !== "string" || path.length > 1024 || !/\.model3\.json$/i.test(path) || /[\x00-\x1f\\]/.test(path) || /^(?:[a-z][\w+.-]*:|\/)/i.test(path) || path.split("/").some((part) => !part || part === "." || part === "..") || paths.has(path) || typeof name !== "string" || !name.trim() || name.length > 200) throw new StorageError("Invalid model manifest.");
+    if (typeof path !== "string" || path.length > 1024 || !/\.(?:vrm|fbx|model3\.json)$/i.test(path) || /[\x00-\x1f\\]/.test(path) || /^(?:[a-z][\w+.-]*:|\/)/i.test(path) || path.split("/").some((part) => !part || part === "." || part === "..") || paths.has(path) || typeof name !== "string" || !name.trim() || name.length > 200) throw new StorageError("Invalid model manifest.");
     paths.add(path); return { path, name: name.trim() };
   });
 }

@@ -91,13 +91,13 @@ Keep row-level security (RLS) enabled on Supabase tables with no public read or 
 
 ---
 
-## Live2D avatars ✨
+## Live2D & 3D avatars ✨
 
-Import licensed Cubism 4 packages (`.zip` or unpacked folder, up to `512 MiB` archive and expanded size) in **Character → Models** (**ตัวละคร → โมเดล**):
+Switch seamlessly between **Live2D** (default) and **3D (VRM / FBX)** inside **Character** (**ตัวละคร**) — your last selected mode is remembered per browser, and only one WebGL canvas is active at a time to keep mobile GPU memory clean.
 
-- Inspects manifests and discovers undeclared `.exp3.json` expressions, poses, and `.motion3.json` groups locally via revocable Blob URLs (`lib/local-models.ts`).
-- Adapts large texture atlases for GPU and mobile/desktop RGBA memory budgets (`128 MiB` desktop / `64 MiB` mobile) via `lib/model-textures.ts` and `lib/png-render-copy.ts` without modifying original packages stored in IndexedDB.
-- **Selected** and **Sorachan** accounts can optionally sync models to private Cloud R2 storage (`lib/cloud-models.ts`). Models are never checked into Git or `public/`. Text chat continues working smoothly even without a loaded Live2D model.
+- **Live2D (Cubism 4):** Import licensed `.zip` or unpacked folders (up to `512 MiB` archive and expanded size). Discovers undeclared `.exp3.json` expressions, poses, and `.motion3.json` groups locally via revocable Blob URLs (`lib/local-models.ts`), and adapts large texture atlases for mobile/desktop GPU budgets (`lib/model-textures.ts`).
+- **3D Avatars (`.vrm` 0.x & 1.0, `.vrma`, `.fbx`, `.zip`, or folder):** Powered by Three.js + `@pixiv/three-vrm` + `@pixiv/three-vrm-animation` + an O(1) `FastFBXLoader` (`lib/avatar-3d-engine.ts`, `lib/vrm-procedural-mocap.ts`). Includes toggleable **Anime** / **Realistic (PBR + IBL)** lighting, autonomous relaxed posture (no T-pose), full-body procedural mocap gestures, SpringBone physics, real-time lip-sync, and AI emotion reactions. See [3D architecture](docs/3d-vrm-fbx-architecture.md).
+- **Private Cloud R2 sync:** **Selected** and **Sorachan** accounts can sync both Live2D and 3D packages to private Cloud R2 storage (`lib/cloud-models.ts`). Licensed models are never checked into Git or `public/`. Text chat continues working smoothly even without a loaded model.
 
 ---
 

@@ -34,8 +34,8 @@ export async function extractModelZip(blob: Blob, maxBytes: number, maxFiles: nu
     const inflater = entry.compression === 8 ? new Inflate(accept) : undefined;
     let lastYield = Date.now();
     try {
-      for (let offset = 0; offset < entry.size; offset += 2048) {
-        const length = Math.min(2048, entry.size - offset);
+      for (let offset = 0; offset < entry.size; offset += 65536) {
+        const length = Math.min(65536, entry.size - offset);
         const data = await read(start + offset, length);
         if (data.length !== length) throw new Error("Compressed data is incomplete.");
         const final = offset + length === entry.size;

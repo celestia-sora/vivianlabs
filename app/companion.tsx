@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { LightingMode } from "@/lib/avatar-3d-engine";
+import { useAvatar3D } from "@/lib/use-avatar-3d";
 import { captureModelRestState, restoreModelRestState, type ModelRestState, type CubismRestModel } from "@/lib/model-rest-state";
 import { attachModelWind, type WindInternalModel } from "@/lib/model-wind";
 import { clampModelTransform, clearModelTransform, loadModelTransform, saveModelTransform, type ModelTransform } from "@/lib/model-position";
@@ -35,6 +37,7 @@ import { createExpressionStack, loadExpressionParameterSets, SAVED_EXPRESSION_ST
 import { MODEL_CONFIG, type ModelKey } from "@/lib/models";
 import { createModelResources, importModelFiles, loadModelCatalog, hydrateModelPackage, modelCatalogEntry, readModelSelection, resolveStartupModel, writeModelSelection, removeModelPackage, saveModelPackage, type ModelPackage, type ModelMotion } from "@/lib/local-models";
 import { CloudModelError, getCloudModels, cloudModelPlaceholder, isCloudLibraryAllowed, uploadCloudModel, downloadCloudModel, deleteCloudModel, saveCloudModelPreference, saveCloudModelExpressions, type CloudLibrary } from "@/lib/cloud-models";
+import { isLive2DCloudModel } from "@/lib/cloud-models-3d";
 import { useVoicePreferences } from "@/lib/use-voice-preferences";
 import { useCustomInstructions } from "@/lib/use-custom-instructions";
 import { useUserProfile } from "@/lib/use-user-profile";
@@ -94,6 +97,8 @@ type Message = HistoryMessage;
 type OrbDirection = "mic" | "camera" | "type" | "settings";
 type Memory = { id: number; memory: string; category: string; importance: number };
 type Panel = "conversations" | "memories" | "character" | "scenes" | "voice" | "status" | "settings";
+type AvatarMode = "live2d" | "3d";
+const AVATAR_MODE_STORAGE_KEY = "vivian-avatar-mode";
 type Conversation = HistoryConversation;
 function isModelVisible(pack: ModelPackage, accountId: string): boolean {
   return !pack.cloudOwner || pack.cloudOwner === accountId || pack.cloudOwner === "shared";
@@ -230,7 +235,28 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     };
   }, []);
 
+  const refreshAccountRef = useRef(refreshAccount);
+  refreshAccountRef.current = refreshAccount;
+  const refreshAccountStable = useCallback(() => refreshAccountRef.current(), []);
+  const [avatarMode, setAvatarModeState] = useState<AvatarMode>("live2d");
+  const avatarModeRef = useRef<AvatarMode>("live2d");
+  avatarModeRef.current = avatarMode;
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(AVATAR_MODE_STORAGE_KEY);
+      if (saved === "3d") queueMicrotask(() => setAvatarModeState("3d"));
+    } catch { /* Optional preference persistence. */ }
+  }, []);
+  const switchAvatarMode = useCallback((next: AvatarMode) => {
+    setAvatarModeState(next);
+    try {
+      window.localStorage.setItem(AVATAR_MODE_STORAGE_KEY, next);
+    } catch { /* Optional preference persistence. */ }
+  }, []);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvas3dRef = useRef<HTMLCanvasElement>(null);
+  const modelFolder3dRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pixiAppRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -468,6 +494,17 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     };
   }), [cloudLibrary, live2dBusy, modelCarouselEntries, modelPreviews, modelStatus, pendingModelId, activeModelId]);
   const [preferencesReady, setPreferencesReady] = useState(false);
+  const avatar3d = useAvatar3D({
+    enabled: avatarMode === "3d",
+    accountId,
+    preferencesReady,
+    canvasRef: canvas3dRef,
+    cloudLibrary,
+    setCloudLibrary,
+    cloudRequestRef: modelCloudRequestRef,
+    accountRef,
+    refreshAccount: refreshAccountStable,
+  });
   const [companion, setCompanion] = useState<CompanionState>(defaultCompanionState());
   const {
     customInstructions,
@@ -552,9 +589,8 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-    // Start the PIXI/Live2D module download now so it overlaps catalog and
-    // cloud loading instead of serializing after the first model is chosen.
-    void preloadLive2DModules().catch(() => {});
+    // Start the PIXI/Live2D module download now only when Live2D is active.
+    if (localStorage.getItem("vivian-avatar-mode") !== "3d") void preloadLive2DModules().catch(() => {});
     const localRequest = loadModelCatalog().catch(() => [] as ModelPackage[]);
     let cancelCloudStart: (() => void) | undefined;
     const cloudRequest = localRequest.then((local) => new Promise<CloudLibrary | null>((resolve) => {
@@ -602,20 +638,21 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         setModelNotice((notice) => notice ?? "ตอนนี้ต่อ Cloud ไม่ติดแฮะ แต่โมเดลที่เซฟไว้ในเครื่องนี้ยังเล่นได้ปกติเลย!");
         return;
       }
+      const live2dCloudModels = cloud.models.filter((model) => !Array.isArray(model.manifests) || model.manifests.some((entry) => /\.model3\.json$/i.test(entry.path)));
       setModelPackages((current) => {
         // Retain hydrated object identities so catalog sync doesn't reload GPU assets.
-        const sharedIds = new Set(cloud.models.filter((model) => model.scope === "shared").map((model) => model.id));
-        const merged = current.filter((pack) => !pack.cloudOwner || cloud.models.some((model) => model.id === pack.id))
+        const sharedIds = new Set(live2dCloudModels.filter((model) => model.scope === "shared").map((model) => model.id));
+        const merged = current.filter((pack) => !pack.cloudOwner || live2dCloudModels.some((model) => model.id === pack.id))
           .map((pack) => sharedIds.has(pack.id) && pack.cloudOwner !== "shared" ? { ...pack, cloudOwner: "shared" } : pack);
         for (const pack of local.filter((entry) => sharedIds.has(entry.id))) {
           if (!merged.some((entry) => entry.id === pack.id)) merged.push({ ...pack, cloudOwner: "shared" });
         }
-        for (const model of cloud.models) if (!merged.some((pack) => pack.id === model.id)) merged.push(cloudModelPlaceholder(model));
+        for (const model of live2dCloudModels) if (!merged.some((pack) => pack.id === model.id)) merged.push(cloudModelPlaceholder(model));
         return merged;
       });
-      const sharedCaches = local.filter((pack) => cloud.models.some((model) => model.scope === "shared" && model.id === pack.id)).map((pack) => ({ ...pack, cloudOwner: "shared" }));
-      const reconciledPackages = packages.filter((pack) => pack.cloudOwner !== "shared" || cloud.models.some((model) => model.scope === "shared" && model.id === pack.id));
-      const allPackages = [...reconciledPackages, ...sharedCaches.filter((pack) => !reconciledPackages.some((localPack) => localPack.id === pack.id)), ...cloud.models.map(cloudModelPlaceholder).filter((pack) => !local.some((localPack) => localPack.id === pack.id))];
+      const sharedCaches = local.filter((pack) => live2dCloudModels.some((model) => model.scope === "shared" && model.id === pack.id)).map((pack) => ({ ...pack, cloudOwner: "shared" }));
+      const reconciledPackages = packages.filter((pack) => pack.cloudOwner !== "shared" || live2dCloudModels.some((model) => model.scope === "shared" && model.id === pack.id));
+      const allPackages = [...reconciledPackages, ...sharedCaches.filter((pack) => !reconciledPackages.some((localPack) => localPack.id === pack.id)), ...live2dCloudModels.map(cloudModelPlaceholder).filter((pack) => !local.some((localPack) => localPack.id === pack.id))];
       const globalSelection = cloud.preference?.modelId;
       selected = globalSelection && allPackages.some((pack) => pack.models.some((model) => model.id === globalSelection))
         ? globalSelection : resolveStartupModel(allPackages, saved, selection);
@@ -647,7 +684,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   // (modelStatus === "ready"). Background preloading for other packages
   // starts only after that point and pauses immediately on any new load.
   useEffect(() => {
-    if (modelStatus !== "ready" || !activeModelId) {
+    if (avatarMode !== "live2d" || modelStatus !== "ready" || !activeModelId) {
       stopBackgroundPreload();
       return;
     }
@@ -657,7 +694,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       // queue; abort on unmount or when leaving the ready state.
       stopBackgroundPreload();
     };
-  }, [modelStatus, activeModelId, modelPackages, cloudLibrary]);
+  }, [avatarMode, modelStatus, activeModelId, modelPackages, cloudLibrary]);
 
   useEffect(() => {
     let disposed = false;
@@ -670,16 +707,17 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
           if (!cloud || disposed) return;
           setCloudLibrary(cloud);
           if (cloud.cloudAllowed === false) return;
+          const live2dCloudModels = cloud.models.filter(isLive2DCloudModel);
           setModelPackages((current) => {
-            const sharedIds = new Set(cloud.models.filter((model) => model.scope === "shared").map((model) => model.id));
-            const merged = current.filter((pack) => !pack.cloudOwner || pack.models.some((model) => model.id === activeModelIdRef.current) || cloud.models.some((model) => model.id === pack.id))
+            const sharedIds = new Set(live2dCloudModels.filter((model) => model.scope === "shared").map((model) => model.id));
+            const merged = current.filter((pack) => !pack.cloudOwner || pack.models.some((model) => model.id === activeModelIdRef.current) || live2dCloudModels.some((model) => model.id === pack.id))
               .map((pack) => sharedIds.has(pack.id) && pack.cloudOwner !== "shared" && !pack.models.some((model) => model.id === activeModelIdRef.current) ? { ...pack, cloudOwner: "shared" } : pack);
-            for (const model of cloud.models) if (!merged.some((pack) => pack.id === model.id)) merged.push(cloudModelPlaceholder(model));
+            for (const model of live2dCloudModels) if (!merged.some((pack) => pack.id === model.id)) merged.push(cloudModelPlaceholder(model));
             return merged;
           });
           // Priority queue re-runs from the ready-effect after this merge;
           // do not start background loads while the active model is busy.
-          refreshSnapshots(cloud.models.map(cloudModelPlaceholder));
+          refreshSnapshots(live2dCloudModels.map(cloudModelPlaceholder));
           // Deliberately do not change activeModelId here; other tabs pick this on reload.
         })();
       }, 400);
@@ -1085,7 +1123,23 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
   }, []);
 
   useEffect(() => {
-    if (!preferencesReady || !modelsReady || graphicsLost || modelPaused) return;
+    if (avatarMode === "live2d") return;
+    stopBackgroundPreload();
+    modelSelectionAbortRef.current?.abort();
+    modelRenderAbortRef.current?.abort();
+    modelPresentationRef.current?.dispose();
+    modelPresentationRef.current = null;
+    modelRef.current = null;
+    modelRestStateRef.current = null;
+    pixiAppRef.current?.destroy(false, { children: true });
+    pixiAppRef.current = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStartupModelPending(false);
+    setModelSwitchPending(false);
+  }, [avatarMode]);
+
+  useEffect(() => {
+    if (avatarMode !== "live2d" || !preferencesReady || !modelsReady || graphicsLost || modelPaused) return;
     stopBackgroundPreload();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveExpression(null);
@@ -1420,9 +1474,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
         releaseResources?.();
       }
     };
-  }, [preferencesReady, modelsReady, activeModel, activePackage, cloudLibrary, textureQuality, modelReload, graphicsLost, modelPaused]);
+  }, [avatarMode, preferencesReady, modelsReady, activeModel, activePackage, cloudLibrary, textureQuality, modelReload, graphicsLost, modelPaused]);
 
   useEffect(() => {
+    if (avatarMode !== "live2d") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const lost = (event: Event) => {
@@ -1444,9 +1499,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       canvas.removeEventListener("webglcontextlost", lost);
       canvas.removeEventListener("webglcontextrestored", restored);
     };
-  }, []);
+  }, [avatarMode]);
 
   useEffect(() => {
+    if (avatarMode !== "live2d") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const pointers = new Map<number, { x: number; y: number }>();
@@ -1609,7 +1665,7 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       pointers.clear();
       if (wheelPersistTimer !== undefined) window.clearTimeout(wheelPersistTimer);
     };
-  }, []);
+  }, [avatarMode]);
 
   useEffect(() => () => {
     modelSelectionAbortRef.current?.abort();
@@ -1843,9 +1899,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     return audioStreamingRef.current;
   }
   function setMouthOpen(value: number) {
+    const mouth = Math.max(0, Math.min(1, value));
+    if (avatarModeRef.current === "3d") {
+      avatar3d.setMouthOpen(mouth);
+      return;
+    }
     const coreModel = modelRef.current?.internalModel?.coreModel;
     if (!coreModel) return;
-    const mouth = Math.max(0, Math.min(1, value));
     try {
       coreModel.setParameterValueById("ParamMouthOpenY", mouth);
       // Some Cubism models expose mouth shape separately. It is optional, so
@@ -1854,9 +1914,13 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     } catch (error) { console.warn("Live2D mouth parameter unavailable", error); }
   }
   function resetReaction() {
-    const expressionManager = modelRef.current?.internalModel?.motionManager?.expressionManager;
     expressionActionRef.current += 1;
     setActiveExpression(null);
+    if (avatarModeRef.current === "3d") {
+      avatar3d.clearReaction();
+      return;
+    }
+    const expressionManager = modelRef.current?.internalModel?.motionManager?.expressionManager;
     try {
       if (expressionManager) {
         // Cubism's resetExpression only resets playback. Clear its selection and
@@ -2316,13 +2380,15 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     const match = text.match(/^\/(?:expression|exp)(?:\s+(.+))?$/i);
     if (!match) return false;
     const argument = match[1]?.trim() ?? "";
-    const expressions = (activeModel?.expressions ?? []);
+    const is3D = avatarModeRef.current === "3d";
+    const expressions = is3D ? avatar3d.activeExpressionsList : (activeModel?.expressions ?? []);
     if (argument.toLowerCase() === "list") {
       setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", `นี่ มีสีหน้าให้เลือกแค่นี้แหละ: ${expressions.join(", ")} อยากได้อันไหนก็จิ้มเอาเลย`)]);
       return true;
     }
     if (!argument || argument.toLowerCase() === "default" || argument.toLowerCase() === "reset") {
-      clearSavedExpressions();
+      if (is3D) avatar3d.clearSavedExpressions();
+      else clearSavedExpressions();
       setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "กลับมาหน้าปกติละนะ")]);
       return true;
     }
@@ -2332,25 +2398,42 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       return true;
     }
     try {
-      if (!modelRef.current) throw new Error("Live2D model is not ready");
-      const selected = activeExpressionModelRef.current === activeModel?.id ? activeExpressionsRef.current : [];
-      if (!selected.includes(expression)) saveExpressionSelection([...selected, expression]);
+      if (is3D) {
+        if (!avatar3d.hasAvatar()) throw new Error("3D model is not ready");
+        const selected = avatar3d.activeExpressionsModelId === avatar3d.activeModel?.id ? avatar3d.activeExpressions : [];
+        if (!selected.includes(expression)) avatar3d.saveExpressionSelection([...selected, expression]);
+      } else {
+        if (!modelRef.current) throw new Error("Live2D model is not ready");
+        const selected = activeExpressionModelRef.current === activeModel?.id ? activeExpressionsRef.current : [];
+        if (!selected.includes(expression)) saveExpressionSelection([...selected, expression]);
+      }
       setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", `โอเค จำหน้า ${expression.trim()} ไว้ให้ละนะ`)]);
     } catch (error) {
-      console.warn("Manual Live2D expression unavailable", error);
+      console.warn("Manual avatar expression unavailable", error);
       resetReaction();
       setMessages((current) => [...current, historyMessage("me", text), historyMessage("vivian", "ยังเปลี่ยนหน้าไม่ได้อะ โมเดลยังไม่มาเลย")]);
     }
     return true;
   }
   async function playReaction(reply: string, userText: string, idle = false) {
+    const { mood, moodIntensity: intensity } = companionRef.current;
+    const emotion = situationEmotion(reply, userText, mood, intensity, idle);
+    if (avatarModeRef.current === "3d") {
+      if (!avatar3d.hasAvatar()) return;
+      try {
+        const result = avatar3d.playEmotionReaction(emotion, intensity);
+        if (result.expression) setActiveExpression(result.expression);
+      } catch (error) {
+        resetReaction();
+        console.warn("3D reaction unavailable; keeping neutral state", error);
+      }
+      return;
+    }
     const model = modelRef.current;
     if (!model) return;
-    const { mood, moodIntensity: intensity } = companionRef.current;
     const supportedExpressions = activeModel?.expressions ?? [];
     // Tags first, then mood, then words. A model with no matching face keeps
     // its last reaction instead of flashing back to neutral every turn.
-    const emotion = situationEmotion(reply, userText, mood, intensity, idle);
     const expression = resolveLive2DExpression(emotion, supportedExpressions);
     try {
       if (expression) {
@@ -3002,13 +3085,14 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     }
   }
 
-  // Show Vivian preloader while a Live2D model is loading — on startup,
-  // while switching models, and while the renderer builds the first frame.
-  const live2dLoading = startupModelPending || modelSwitchPending || modelStatus === "loading";
+  // Show Vivian preloader while the active Live2D or 3D avatar is loading.
+  const avatarLoading = avatarMode === "3d"
+    ? avatar3d.isBusy
+    : (startupModelPending || modelSwitchPending || modelStatus === "loading");
 
   return <main className="companion-shell">
     <PagePreloader
-      active={live2dLoading}
+      active={avatarLoading}
       variant="words"
       background="bg-background/90 backdrop-blur-sm"
       words={["รอแป๊บนึงน้า...", "กำลังแต่งตัวให้จึ้งอยู่", "อย่าเพิ่งหนีไปไหนนะ... เดี๋ยวมา", "แค่เธอคนเดียวยอมรอหน่อยได้ป่ะ", "ใกล้เสร็จละ อะแฮ่ม!"]}
@@ -3016,7 +3100,9 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
     />
     <section className={`companion-stage ${MODEL_CONFIG[selectedModel].background} ${!sending && !recording ? "is-idle" : ""}`} aria-label="Vivian companion">
       <SceneBackground source={sceneLibrary.scenes.find((scene) => scene.id === activeCustomSceneId)?.imageUrl ?? BACKGROUNDS[selectedPreset]} preview={sceneLibrary.scenes.find((scene) => scene.id === activeCustomSceneId)?.thumbnailUrl} timing={sceneLibrary.selectionTiming} />
-      <canvas className="live2d-canvas" ref={canvasRef} />
+      {avatarMode === "3d"
+        ? <canvas key="avatar-3d" className="live2d-canvas" data-avatar-mode="3d" ref={canvas3dRef} />
+        : <canvas key="avatar-live2d" className="live2d-canvas" data-avatar-mode="live2d" ref={canvasRef} />}
       <header className="companion-brand">
         <button className="brand-menu" type="button" onClick={openMenuHub} aria-label="เปิดเมนู Vivian (แชต ความจำ ตัวละคร ฉาก เสียง สิทธิ์)">
           <span className="brand-mark" aria-hidden="true"/><span>Vivian</span>
@@ -3128,7 +3214,10 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
       <div className="floating-workspace menu-window">
         <section className="floating-panel" role="dialog" aria-modal="true" aria-label={panel ? navigation.find((item) => item.key === panel)?.label : "เมนู Vivian"}>
           <div className="floating-panel-head">{panel && <button className="settings-back" type="button" onClick={backToNavigation} aria-label="กลับไปหน้าเมนู"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>}<div><small>{panel ? `VIVIAN / ${panel.toUpperCase()}` : "VIVIAN / MENU"}</small><h2>{panel ? navigation.find((item) => item.key === panel)?.label : "เมนู"}</h2></div><button type="button" onClick={closeNavigation} aria-label="ปิดเมนู"><Icon name="close" size={18}/></button></div>
-          {modelImporting && panel === "character" && <div className={`floating-panel-loadbar${typeof displayedImportPercent === "number" ? " is-determinate" : " is-indeterminate"}`} aria-hidden="true"><span style={typeof displayedImportPercent === "number" ? { width: `${displayedImportPercent}%` } : undefined} /></div>}
+          {((avatarMode === "3d" ? avatar3d.modelImporting : modelImporting) && panel === "character") && (() => {
+            const pct = avatarMode === "3d" ? avatar3d.displayedImportPercent : displayedImportPercent;
+            return <div className={`floating-panel-loadbar${typeof pct === "number" ? " is-determinate" : " is-indeterminate"}`} aria-hidden="true"><span style={typeof pct === "number" ? { width: `${pct}%` } : undefined} /></div>;
+          })()}
           <div className="floating-panel-body">
             {!panel && <>
               <TierMenuSummary
@@ -3144,7 +3233,9 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
             </>}
             {panel === "conversations" && (() => {
               const preview = conversations.find((item) => item.id === previewConversationId);
-              const avatar = modelPreviews[activeModelId ?? ""] ?? Object.values(modelPreviews)[0];
+              const avatar = avatarMode === "3d"
+                ? (avatar3d.activePreviewUrl ?? modelPreviews[activeModelId ?? ""] ?? Object.values(modelPreviews)[0])
+                : (modelPreviews[activeModelId ?? ""] ?? Object.values(modelPreviews)[0]);
               const timeLabel = (updatedAt: number) => {
                 const days = Math.floor((Date.now() - updatedAt) / 86_400_000);
                 return days <= 0 ? "วันนี้" : days === 1 ? "เมื่อวาน" : new Intl.DateTimeFormat("th-TH", { month: "short", day: "numeric" }).format(updatedAt);
@@ -3247,112 +3338,240 @@ export default function Companion({ accountEmail: initialAccountEmail, accountId
               <div className="memory-list">{memories.length ? memories.map((memory) => <article key={memory.id}><Icon name="memory" size={18}/>{editingMemoryId === memory.id ? <div className="memory-edit"><textarea value={memoryDraft} maxLength={500} onChange={(event) => setMemoryDraft(event.target.value)}/><div><button type="button" onClick={() => void saveMemory(memory)}>เซฟ</button><button type="button" onClick={() => setEditingMemoryId(null)}>ยกเลิก</button></div></div> : <><p><strong>{memory.category}</strong>{memory.memory}</p><button type="button" className="memory-edit-button" onClick={() => { setEditingMemoryId(memory.id); setMemoryDraft(memory.memory); }}>แก้</button></>}</article>) : <p className="floating-empty">ตอนนี้ยังไม่มีเรื่องที่ Vivian จดไว้เลย คุยกันไปเรื่อย ๆ เดี๋ยวก็จำได้เอง</p>}</div>
             </>}
             {panel === "character" && <>
-              <div className="floating-tabs">{(["outfit", "expression", "pose"] as const).map((tab) => <button key={tab} type="button" className={characterTab === tab ? "is-selected" : ""} onClick={() => setCharacterTab(tab)}>{tab === "outfit" ? "โมเดล" : tab === "expression" ? "สีหน้า" : "ท่าทาง"}</button>)}</div>
-              {characterTab === "outfit" && <>
-                {modelCarouselItems.length > 0 ? <CoverflowCarousel
-                  ariaLabel="Live2D models"
-                  className={modelImporting ? "pointer-events-none opacity-60" : "character-model-carousel"}
-                  depth={90}
-                  index={modelCarouselIndex}
-                  items={modelCarouselItems}
-                  onIndexChange={(index) => {
-                    const entry = modelCarouselEntries[index];
-                    if (entry && entry.model.id !== activeModelId) {
-                      setPendingModelId(entry.model.id);
-                      void chooseModel(entry.model.id);
-                    }
-                  }}
-                  rotation={32}
-                  spacing={155}
-                /> : <div className="character-preview character-preview-empty"><strong>ยังไม่มีโมเดลเลย</strong><small>อัปโหลดโมเดล Live2D มาใส่ก่อนนะ</small></div>}
-                {activeModel && <p className="floating-note model-carousel-status" role="status"><span className={`load-dot ${live2dBusy ? "is-loading" : modelStatus === "ready" ? "is-ready" : "is-error"}`} aria-hidden="true" />{live2dBusy ? "กำลังโหลด Live2D…" : modelStatus === "ready" ? `Live2D พร้อมแล้ว — ${activeModel.expressions.length} สีหน้า · ${activeModel.motions.length} ท่าทาง` : "ยังไม่ได้โหลดโมเดล"}</p>}
-                {activeModel && <label className="model-select-label">ความชัดของภาพโมเดล<select value={textureQuality} onChange={(event) => { setModelNotice(null); setTextureQuality(event.target.value as "auto" | "original"); }}><option value="auto">อัตโนมัติ · พอดีกับเครื่องนี้</option><option value="original">คมชัดสุด (ไฟล์ต้นฉบับ)</option></select></label>}
-                {activeModel && <button type="button" className="floating-option" disabled={modelStatus === "loading" || graphicsLost || modelImporting} onClick={() => { void (async () => { setModelNotice(null); if (modelPaused) { setTextureQuality("auto"); await chooseModel(activeModel.id); } setModelPaused(false); setModelReload((value) => value + 1); })(); }}>โหลดโมเดลอีกรอบ</button>}
-                {activeModel && <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={resetModelTransform}>รีเซ็ตตำแหน่งกับขนาด</button>}
-                {activeModel && <p className="floating-note">ลากย้ายตำแหน่ง · ถ่างนิ้ว/เลื่อนลูกกลิ้งเพื่อซูม · แตะสองครั้งเพื่อรีเซ็ต</p>}
-                {textureSummary && <p className="floating-note">{textureSummary} (ไฟล์ต้นฉบับยังอยู่ครบนะ)</p>}
-                <AnimatedFileUpload
-                  key={`model-upload-${modelUploadKey}`}
-                  accept=".zip"
-                  className="vivian-upload"
-                  disabled={modelImporting || !modelsReady}
-                  maxSize={512 * 1024 * 1024}
-                  multiple={false}
-                  onFilesSelected={(files) => {
-                    const zip = files[0];
-                    if (!zip) return;
-                    void importModels([zip]).finally(() => setModelUploadKey((value) => value + 1));
-                  }}
-                  progress={modelImporting ? modelImportProgress : null}
-                />
-                <div className="model-import-actions">
-                  <button className="floating-option" type="button" disabled={modelImporting || !modelsReady} onClick={() => modelFolderRef.current?.click()}>หรือเลือกเป็นโฟลเดอร์โมเดลแทนก็ได้</button>
-                </div>
-                <input ref={modelFolderRef} hidden type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={(event) => { const input = event.currentTarget; const files = Array.from(input.files ?? []); void importModels(files).finally(() => { input.value = ""; }); }} />
-                {(() => {
-                  const canUseCloudModels = account
-                    ? account.capabilities.canUseCloudModels
-                    : isCloudLibraryAllowed(cloudLibrary);
-                  const isFreeTier = account ? account.tier === "free" : cloudLibrary?.cloudAllowed === false;
-                  const isSelectedTier = account ? account.tier === "selected" : cloudLibrary?.tier === "selected";
-                  const isSorachanTier = account ? account.tier === "sorachan" : cloudLibrary?.tier === "sorachan";
-                  const isCloudModelPackage = Boolean(
-                    activePackage && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.models.some((model) => model.id === activePackage.id),
-                  );
-                  const personalUsedBytes = cloudLibrary?.personalUsage?.used ?? account?.storage.usedBytes ?? 0;
-                  const personalLimitBytes = cloudLibrary?.personalUsage?.limit ?? account?.storage.limitBytes ?? 512 * 1024 * 1024;
-                  return <>
-                    <p className="floating-note">
-                      {isFreeTier
-                        ? "ลงโมเดลจาก ZIP หรือโฟลเดอร์ไว้เล่นบนเครื่องนี้ได้ปกติเลยนะ (ขอไฟล์โมเดลครบ ๆ ขนาดไม่เกิน 512 MB)"
-                        : canUseCloudModels && cloudLibrary
-                          ? "โมเดลที่ลงใหม่จะเซฟขึ้นคลาวด์ส่วนตัวให้เลย แล้วเก็บสำเนาไว้ในเครื่องด้วย (ขนาดไม่เกิน 512 MB)"
-                          : "ตอนนี้เซฟโมเดลไว้ในเครื่องก่อนนะ เผื่อคลาวด์ยังไม่พร้อม (ขนาดไม่เกิน 512 MB)"}
-                    </p>
-                    {isFreeTier && (
-                      <div className="tier-gate-notice" role="note">
-                        <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
-                        <button type="button" className="floating-option model-import-primary" onClick={() => setRequestModalOpen(true)}>
-                          ขออัปเป็น Selected
+              <div className="avatar-mode-switch" role="tablist" aria-label="โหมดตัวละคร">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={avatarMode === "live2d"}
+                  className={avatarMode === "live2d" ? "is-selected" : ""}
+                  onClick={() => switchAvatarMode("live2d")}
+                >
+                  Live2D
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={avatarMode === "3d"}
+                  className={avatarMode === "3d" ? "is-selected" : ""}
+                  onClick={() => switchAvatarMode("3d")}
+                >
+                  3D (VRM / FBX)
+                </button>
+              </div>
+              <div className="floating-tabs">{(["outfit", "expression", "pose"] as const).map((tab) => <button key={tab} type="button" className={characterTab === tab ? "is-selected" : ""} onClick={() => setCharacterTab(tab)}>{tab === "outfit" ? (avatarMode === "3d" ? "โมเดล 3D" : "โมเดล") : tab === "expression" ? "สีหน้า" : "ท่าทาง"}</button>)}</div>
+              {avatarMode === "live2d" ? <>
+                {characterTab === "outfit" && <>
+                  {modelCarouselItems.length > 0 ? <CoverflowCarousel
+                    ariaLabel="Live2D models"
+                    className={modelImporting ? "pointer-events-none opacity-60" : "character-model-carousel"}
+                    depth={90}
+                    index={modelCarouselIndex}
+                    items={modelCarouselItems}
+                    onIndexChange={(index) => {
+                      const entry = modelCarouselEntries[index];
+                      if (entry && entry.model.id !== activeModelId) {
+                        setPendingModelId(entry.model.id);
+                        void chooseModel(entry.model.id);
+                      }
+                    }}
+                    rotation={32}
+                    spacing={155}
+                  /> : <div className="character-preview character-preview-empty"><strong>ยังไม่มีโมเดลเลย</strong><small>อัปโหลดโมเดล Live2D มาใส่ก่อนนะ</small></div>}
+                  {activeModel && <p className="floating-note model-carousel-status" role="status"><span className={`load-dot ${live2dBusy ? "is-loading" : modelStatus === "ready" ? "is-ready" : "is-error"}`} aria-hidden="true" />{live2dBusy ? "กำลังโหลด Live2D…" : modelStatus === "ready" ? `Live2D พร้อมแล้ว — ${activeModel.expressions.length} สีหน้า · ${activeModel.motions.length} ท่าทาง` : "ยังไม่ได้โหลดโมเดล"}</p>}
+                  {activeModel && <label className="model-select-label">ความชัดของภาพโมเดล<select value={textureQuality} onChange={(event) => { setModelNotice(null); setTextureQuality(event.target.value as "auto" | "original"); }}><option value="auto">อัตโนมัติ · พอดีกับเครื่องนี้</option><option value="original">คมชัดสุด (ไฟล์ต้นฉบับ)</option></select></label>}
+                  {activeModel && <button type="button" className="floating-option" disabled={modelStatus === "loading" || graphicsLost || modelImporting} onClick={() => { void (async () => { setModelNotice(null); if (modelPaused) { setTextureQuality("auto"); await chooseModel(activeModel.id); } setModelPaused(false); setModelReload((value) => value + 1); })(); }}>โหลดโมเดลอีกรอบ</button>}
+                  {activeModel && <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={resetModelTransform}>รีเซ็ตตำแหน่งกับขนาด</button>}
+                  {activeModel && <p className="floating-note">ลากย้ายตำแหน่ง · ถ่างนิ้ว/เลื่อนลูกกลิ้งเพื่อซูม · แตะสองครั้งเพื่อรีเซ็ต</p>}
+                  {textureSummary && <p className="floating-note">{textureSummary} (ไฟล์ต้นฉบับยังอยู่ครบนะ)</p>}
+                  <AnimatedFileUpload
+                    key={`model-upload-${modelUploadKey}`}
+                    accept=".zip"
+                    className="vivian-upload"
+                    disabled={modelImporting || !modelsReady}
+                    maxSize={512 * 1024 * 1024}
+                    multiple={false}
+                    onFilesSelected={(files) => {
+                      const zip = files[0];
+                      if (!zip) return;
+                      void importModels([zip]).finally(() => setModelUploadKey((value) => value + 1));
+                    }}
+                    progress={modelImporting ? modelImportProgress : null}
+                  />
+                  <div className="model-import-actions">
+                    <button className="floating-option" type="button" disabled={modelImporting || !modelsReady} onClick={() => modelFolderRef.current?.click()}>หรือเลือกเป็นโฟลเดอร์โมเดลแทนก็ได้</button>
+                  </div>
+                  <input ref={modelFolderRef} hidden type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={(event) => { const input = event.currentTarget; const files = Array.from(input.files ?? []); void importModels(files).finally(() => { input.value = ""; }); }} />
+                  {(() => {
+                    const canUseCloudModels = account
+                      ? account.capabilities.canUseCloudModels
+                      : isCloudLibraryAllowed(cloudLibrary);
+                    const isFreeTier = account ? account.tier === "free" : cloudLibrary?.cloudAllowed === false;
+                    const isSelectedTier = account ? account.tier === "selected" : cloudLibrary?.tier === "selected";
+                    const isSorachanTier = account ? account.tier === "sorachan" : cloudLibrary?.tier === "sorachan";
+                    const isCloudModelPackage = Boolean(
+                      activePackage && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.models.some((model) => model.id === activePackage.id),
+                    );
+                    const personalUsedBytes = cloudLibrary?.personalUsage?.used ?? account?.storage.usedBytes ?? 0;
+                    const personalLimitBytes = cloudLibrary?.personalUsage?.limit ?? account?.storage.limitBytes ?? 512 * 1024 * 1024;
+                    return <>
+                      <p className="floating-note">
+                        {isFreeTier
+                          ? "ลงโมเดลจาก ZIP หรือโฟลเดอร์ไว้เล่นบนเครื่องนี้ได้ปกติเลยนะ (ขอไฟล์โมเดลครบ ๆ ขนาดไม่เกิน 512 MB)"
+                          : canUseCloudModels && cloudLibrary
+                            ? "โมเดลที่ลงใหม่จะเซฟขึ้นคลาวด์ส่วนตัวให้เลย แล้วเก็บสำเนาไว้ในเครื่องด้วย (ขนาดไม่เกิน 512 MB)"
+                            : "ตอนนี้เซฟโมเดลไว้ในเครื่องก่อนนะ เผื่อคลาวด์ยังไม่พร้อม (ขนาดไม่เกิน 512 MB)"}
+                      </p>
+                      {isFreeTier && (
+                        <div className="tier-gate-notice" role="note">
+                          <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
+                          <button type="button" className="floating-option model-import-primary" onClick={() => setRequestModalOpen(true)}>
+                            ขออัปเป็น Selected
+                          </button>
+                        </div>
+                      )}
+                      {isSelectedTier && canUseCloudModels && (
+                        <p className="floating-note">
+                          Personal Cloud R2: {formatPersonalMb(personalUsedBytes)} / {Math.round(personalLimitBytes / (1024 * 1024))} MB
+                        </p>
+                      )}
+                      {isSorachanTier && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.usage && (
+                        <p className="floating-note">
+                          โมเดล + ฉากที่ใช้ไป: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB (เผื่อพื้นที่ว่างไว้ 2 GB กันเต็ม รวมไฟล์ที่กำลังอัปโหลดด้วยนะ)
+                        </p>
+                      )}
+                      {activePackage && canUseCloudModels && isCloudLibraryAllowed(cloudLibrary) && !isCloudModelPackage && (
+                        <button className="floating-option" type="button" disabled={modelImporting} onClick={() => { void saveActiveModelToCloud(); }}>
+                          เซฟโมเดลนี้ขึ้นคลาวด์
                         </button>
-                      </div>
-                    )}
-                    {isSelectedTier && canUseCloudModels && (
+                      )}
+                      {activePackage && (
+                        <button className="floating-option model-remove" type="button" disabled={modelImporting} onClick={() => { void removeActiveModel(); }}>
+                          {isCloudModelPackage ? "ลบโมเดลนี้ออกจากคลาวด์และเครื่องนี้" : "ลบโมเดลนี้ออกจากเครื่อง"}
+                        </button>
+                      )}
+                    </>;
+                  })()}
+                </>}
+                {characterTab === "expression" && <>
+                  <button type="button" className="floating-option" disabled={modelStatus !== "ready" || !activeExpressions.length} onClick={clearSavedExpressions}>รีเซ็ตสีหน้าที่เซฟไว้</button>
+                  <p className="floating-note">จิ้มเลือกสีหน้าไว้ได้หลายอันเลยนะ รอบหน้าพอเปิดโมเดลนี้ Vivian จะจำหน้านี้ไว้ให้</p>
+                  <div className="expression-grid">{activeModel?.expressions.map((expression, index) => <button type="button" key={`${expression}:${index}`} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(expression)} onClick={() => toggleSavedExpression(expression)}>{expression.trim()}</button>)}</div>
+                  {!activeModel?.expressions.length && <p className="floating-note">{activeModel ? "โมเดลนี้ไม่มีสีหน้าให้เลือกเลยแฮะ" : "ลองลงโมเดลในแท็บ โมเดล ก่อนนะ เดี๋ยวสีหน้าจะขึ้นมาให้เลือก"}</p>}
+                </>}
+                {characterTab === "pose" && <>
+                  <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={() => { resetReaction(); void selectMotion(null); }}>กลับมาท่ายืนปกติ</button>
+                  {!!activeModel?.poses?.length && <><p className="floating-note">ท่าโพส</p><div className="expression-grid">{activeModel.poses.map((pose) => <button type="button" key={pose} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(pose)} onClick={() => toggleSavedExpression(pose)}>{pose}</button>)}</div></>}
+                  {[...new Set(activeModel?.motions.map((motion) => motion.group) ?? [])].map((group) => <div className="model-motion-group" key={group}><p className="floating-note">{group || "ท่าทั่วไป"}</p><div className="expression-grid">{activeModel?.motions.filter((motion) => motion.group === group).map((motion) => <button type="button" key={motion.index} disabled={modelStatus !== "ready"} aria-pressed={activeMotion === `${group}:${motion.index}`} onClick={() => { if (activeMotion === `${group}:${motion.index}`) { resetReaction(); void selectMotion(null); } else void selectMotion(motion); }}>{motion.name}</button>)}</div></div>)}
+                  {!activeModel?.motions.length && !activeModel?.poses?.length && <p className="floating-note">{activeModel ? "โมเดลนี้ไม่มีท่าขยับให้กดเล่นเลยอะ" : "ลองลงโมเดลในแท็บ โมเดล ก่อนนะ เดี๋ยวท่าทางจะขึ้นมาให้เลือก"}</p>}
+                </>}
+                {modelNotice && <p className="model-notice" role="alert">{modelNotice}</p>}
+              </> : <>
+                {characterTab === "outfit" && <>
+                  {avatar3d.carouselItems.length > 0 ? <CoverflowCarousel
+                    ariaLabel="3D VRM & FBX models"
+                    className={avatar3d.modelImporting ? "pointer-events-none opacity-60" : "character-model-carousel"}
+                    depth={90}
+                    index={avatar3d.carouselIndex}
+                    items={avatar3d.carouselItems}
+                    onIndexChange={(index) => {
+                      const entry = avatar3d.carouselEntries[index];
+                      if (entry && entry.model.id !== avatar3d.activeModelId) {
+                        avatar3d.setPendingModelId(entry.model.id);
+                        void avatar3d.chooseModel(entry.model.id);
+                      }
+                    }}
+                    rotation={32}
+                    spacing={155}
+                  /> : <div className="character-preview character-preview-empty"><strong>ยังไม่มีโมเดล 3D เลย</strong><small>อัปโหลดไฟล์ .vrm, .fbx หรือ .zip มาใส่ก่อนนะ</small></div>}
+                  {avatar3d.activeModel && <p className="floating-note model-carousel-status" role="status"><span className={`load-dot ${avatar3d.isBusy ? "is-loading" : avatar3d.modelStatus === "ready" ? "is-ready" : "is-error"}`} aria-hidden="true" />{avatar3d.isBusy ? "กำลังโหลดโมเดล 3D…" : avatar3d.modelStatus === "ready" ? `3D ${(avatar3d.activeModel.format ?? "vrm").toUpperCase()} พร้อมแล้ว — ${avatar3d.activeExpressionsList.length} สีหน้า · ${avatar3d.activeMotionsList.length} ท่าทาง` : "ยังไม่ได้โหลดโมเดล"}</p>}
+                  <label className="model-select-label">โหมดแสง 3D<select value={avatar3d.lightingMode} onChange={(event) => { avatar3d.setLightingMode(event.target.value as LightingMode); }}><option value="anime">สไตล์อนิเมะ · แสงนุ่มสีสด (VRM / MToon)</option><option value="realistic">สมจริง (PBR) · แสงเงา + สะท้อน</option></select></label>
+                  {avatar3d.activeModel && <label className="model-select-label">ความชัดของภาพโมเดล<select value={avatar3d.textureQuality} onChange={(event) => { avatar3d.setModelNotice(null); avatar3d.setTextureQuality(event.target.value as "auto" | "original"); }}><option value="auto">อัตโนมัติ · พอดีกับเครื่องนี้</option><option value="original">คมชัดสุด (ความละเอียดเต็ม)</option></select></label>}
+                  {avatar3d.activeModel && <button type="button" className="floating-option" disabled={avatar3d.modelStatus === "loading" || avatar3d.graphicsLost || avatar3d.modelImporting} onClick={() => { void avatar3d.reloadActiveModel(); }}>โหลดโมเดลอีกรอบ</button>}
+                  {avatar3d.activeModel && <button type="button" className="floating-option" disabled={avatar3d.modelStatus !== "ready"} onClick={avatar3d.resetModelTransform}>รีเซ็ตตำแหน่งกับขนาด</button>}
+                  {avatar3d.activeModel && <p className="floating-note">ลากย้ายตำแหน่ง · ถ่างนิ้ว/เลื่อนลูกกลิ้งเพื่อซูม · แตะสองครั้งเพื่อรีเซ็ต (การขยับตัวละครระบบจัดการให้เองอัตโนมัติ)</p>}
+                  <AnimatedFileUpload
+                    key={`model-3d-upload-${avatar3d.modelUploadKey}`}
+                    accept=".vrm,.vrma,.fbx,.zip"
+                    className="vivian-upload"
+                    disabled={avatar3d.modelImporting || !avatar3d.modelsReady}
+                    maxSize={512 * 1024 * 1024}
+                    multiple={false}
+                    onFilesSelected={(files) => {
+                      const selected = files[0];
+                      if (!selected) return;
+                      void avatar3d.importModels([selected]).finally(() => avatar3d.setModelUploadKey((value) => value + 1));
+                    }}
+                    progress={avatar3d.modelImporting ? avatar3d.modelImportProgress : null}
+                  />
+                  <div className="model-import-actions">
+                    <button className="floating-option" type="button" disabled={avatar3d.modelImporting || !avatar3d.modelsReady} onClick={() => modelFolder3dRef.current?.click()}>หรือเลือกเป็นโฟลเดอร์โมเดล 3D แทนก็ได้</button>
+                  </div>
+                  <input ref={modelFolder3dRef} hidden type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={(event) => { const input = event.currentTarget; const files = Array.from(input.files ?? []); void avatar3d.importModels(files).finally(() => { input.value = ""; }); }} />
+                  {(() => {
+                    const canUseCloudModels = account
+                      ? account.capabilities.canUseCloudModels
+                      : isCloudLibraryAllowed(cloudLibrary);
+                    const isFreeTier = account ? account.tier === "free" : cloudLibrary?.cloudAllowed === false;
+                    const isSelectedTier = account ? account.tier === "selected" : cloudLibrary?.tier === "selected";
+                    const isSorachanTier = account ? account.tier === "sorachan" : cloudLibrary?.tier === "sorachan";
+                    const isCloudModelPackage = Boolean(
+                      avatar3d.activePackage && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.models.some((model) => model.id === avatar3d.activePackage!.id),
+                    );
+                    const personalUsedBytes = cloudLibrary?.personalUsage?.used ?? account?.storage.usedBytes ?? 0;
+                    const personalLimitBytes = cloudLibrary?.personalUsage?.limit ?? account?.storage.limitBytes ?? 512 * 1024 * 1024;
+                    return <>
                       <p className="floating-note">
-                        Personal Cloud R2: {formatPersonalMb(personalUsedBytes)} / {Math.round(personalLimitBytes / (1024 * 1024))} MB
+                        {isFreeTier
+                          ? "ลงโมเดล 3D (.vrm / .fbx / .zip หรือโฟลเดอร์) ไว้เล่นบนเครื่องนี้ได้ปกติเลยนะ (ขนาดไม่เกิน 512 MB)"
+                          : canUseCloudModels && cloudLibrary
+                            ? "โมเดล 3D ที่ลงใหม่จะเซฟขึ้นคลาวด์ส่วนตัวให้เลย แล้วเก็บสำเนาไว้ในเครื่องด้วย (ขนาดไม่เกิน 512 MB)"
+                            : "ตอนนี้เซฟโมเดล 3D ไว้ในเครื่องก่อนนะ รองรับ .vrm, .fbx, .zip หรือโฟลเดอร์ (ไม่เกิน 512 MB)"}
                       </p>
-                    )}
-                    {isSorachanTier && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.usage && (
-                      <p className="floating-note">
-                        โมเดล + ฉากที่ใช้ไป: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB (เผื่อพื้นที่ว่างไว้ 2 GB กันเต็ม รวมไฟล์ที่กำลังอัปโหลดด้วยนะ)
-                      </p>
-                    )}
-                    {activePackage && canUseCloudModels && isCloudLibraryAllowed(cloudLibrary) && !isCloudModelPackage && (
-                      <button className="floating-option" type="button" disabled={modelImporting} onClick={() => { void saveActiveModelToCloud(); }}>
-                        เซฟโมเดลนี้ขึ้นคลาวด์
-                      </button>
-                    )}
-                    {activePackage && (
-                      <button className="floating-option model-remove" type="button" disabled={modelImporting} onClick={() => { void removeActiveModel(); }}>
-                        {isCloudModelPackage ? "ลบโมเดลนี้ออกจากคลาวด์และเครื่องนี้" : "ลบโมเดลนี้ออกจากเครื่อง"}
-                      </button>
-                    )}
-                  </>;
-                })()}
+                      {isFreeTier && (
+                        <div className="tier-gate-notice" role="note">
+                          <p>{CLOUD_TIER_REQUIRED_MESSAGE}</p>
+                          <button type="button" className="floating-option model-import-primary" onClick={() => setRequestModalOpen(true)}>
+                            ขออัปเป็น Selected
+                          </button>
+                        </div>
+                      )}
+                      {isSelectedTier && canUseCloudModels && (
+                        <p className="floating-note">
+                          Personal Cloud R2: {formatPersonalMb(personalUsedBytes)} / {Math.round(personalLimitBytes / (1024 * 1024))} MB
+                        </p>
+                      )}
+                      {isSorachanTier && isCloudLibraryAllowed(cloudLibrary) && cloudLibrary?.usage && (
+                        <p className="floating-note">
+                          โมเดล + ฉากที่ใช้ไป: {((cloudLibrary.usage.live2d.used + cloudLibrary.usage.other.used) / 1e9).toFixed(2)} / 8 GB (เผื่อพื้นที่ว่างไว้ 2 GB กันเต็ม รวมไฟล์ที่กำลังอัปโหลดด้วยนะ)
+                        </p>
+                      )}
+                      {avatar3d.activePackage && canUseCloudModels && isCloudLibraryAllowed(cloudLibrary) && !isCloudModelPackage && (
+                        <button className="floating-option" type="button" disabled={avatar3d.modelImporting} onClick={() => { void avatar3d.saveActiveModelToCloud(); }}>
+                          เซฟโมเดลนี้ขึ้นคลาวด์
+                        </button>
+                      )}
+                      {avatar3d.activePackage && (
+                        <button className="floating-option model-remove" type="button" disabled={avatar3d.modelImporting} onClick={() => { void avatar3d.removeActiveModel(); }}>
+                          {isCloudModelPackage ? "ลบโมเดลนี้ออกจากคลาวด์และเครื่องนี้" : "ลบโมเดลนี้ออกจากเครื่อง"}
+                        </button>
+                      )}
+                    </>;
+                  })()}
+                </>}
+                {characterTab === "expression" && <>
+                  <button type="button" className="floating-option" disabled={avatar3d.modelStatus !== "ready" || !avatar3d.activeExpressions.length} onClick={avatar3d.clearSavedExpressions}>รีเซ็ตสีหน้าที่เซฟไว้</button>
+                  <p className="floating-note">จิ้มเลือกสีหน้าไว้ได้หลายอันเลยนะ รอบหน้าพอเปิดโมเดลนี้ Vivian จะจำหน้านี้ไว้ให้</p>
+                  <div className="expression-grid">{avatar3d.activeExpressionsList.map((expression, index) => <button type="button" key={`${expression}:${index}`} disabled={avatar3d.modelStatus !== "ready"} aria-pressed={avatar3d.activeExpressionsModelId === avatar3d.activeModel?.id && avatar3d.activeExpressions.includes(expression)} onClick={() => avatar3d.toggleSavedExpression(expression)}>{expression.trim()}</button>)}</div>
+                  {!avatar3d.activeExpressionsList.length && <p className="floating-note">{avatar3d.activeModel ? "โมเดลนี้ไม่มีสีหน้า/Blendshape ให้เลือกเลยแฮะ" : "ลองลงโมเดล 3D ในแท็บ โมเดล 3D ก่อนนะ เดี๋ยวสีหน้าจะขึ้นมาให้เลือก"}</p>}
+                </>}
+                {characterTab === "pose" && <>
+                  <button type="button" className="floating-option" disabled={avatar3d.modelStatus !== "ready"} onClick={() => { resetReaction(); void avatar3d.selectMotion(null); }}>กลับมาท่ายืนปกติ</button>
+                  {!!avatar3d.activeModel?.poses?.length && <><p className="floating-note">ท่าโพส</p><div className="expression-grid">{avatar3d.activeModel.poses.map((pose) => <button type="button" key={pose} disabled={avatar3d.modelStatus !== "ready"} aria-pressed={avatar3d.activeExpressionsModelId === avatar3d.activeModel?.id && avatar3d.activeExpressions.includes(pose)} onClick={() => avatar3d.toggleSavedExpression(pose)}>{pose}</button>)}</div></>}
+                  {[...new Set(avatar3d.activeMotionsList.map((motion) => motion.group))].map((group) => <div className="model-motion-group" key={group}><p className="floating-note">{group || "ท่าทั่วไป"}</p><div className="expression-grid">{avatar3d.activeMotionsList.filter((motion) => motion.group === group).map((motion) => <button type="button" key={motion.index} disabled={avatar3d.modelStatus !== "ready"} aria-pressed={avatar3d.activeMotion === `${group}:${motion.index}`} onClick={() => { if (avatar3d.activeMotion === `${group}:${motion.index}`) { resetReaction(); void avatar3d.selectMotion(null); } else void avatar3d.selectMotion(motion); }}>{motion.name}</button>)}</div></div>)}
+                  {!avatar3d.activeMotionsList.length && !avatar3d.activeModel?.poses?.length && <p className="floating-note">{avatar3d.activeModel ? "โมเดลนี้ใช้ท่าขยับอัตโนมัติของระบบ (ถ้าอยากเพิ่มคลิป Mocap ใส่ไฟล์ .vrma หรือ .fbx คู่ใน ZIP/โฟลเดอร์ได้เลย)" : "ลองลงโมเดล 3D ในแท็บ โมเดล 3D ก่อนนะ เดี๋ยวท่าทางจะขึ้นมาให้เลือก"}</p>}
+                </>}
+                {avatar3d.modelNotice && <p className="model-notice" role="alert">{avatar3d.modelNotice}</p>}
               </>}
-              {characterTab === "expression" && <>
-                <button type="button" className="floating-option" disabled={modelStatus !== "ready" || !activeExpressions.length} onClick={clearSavedExpressions}>รีเซ็ตสีหน้าที่เซฟไว้</button>
-                <p className="floating-note">จิ้มเลือกสีหน้าไว้ได้หลายอันเลยนะ รอบหน้าพอเปิดโมเดลนี้ Vivian จะจำหน้านี้ไว้ให้</p>
-                <div className="expression-grid">{activeModel?.expressions.map((expression, index) => <button type="button" key={`${expression}:${index}`} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(expression)} onClick={() => toggleSavedExpression(expression)}>{expression.trim()}</button>)}</div>
-                {!activeModel?.expressions.length && <p className="floating-note">{activeModel ? "โมเดลนี้ไม่มีสีหน้าให้เลือกเลยแฮะ" : "ลองลงโมเดลในแท็บ โมเดล ก่อนนะ เดี๋ยวสีหน้าจะขึ้นมาให้เลือก"}</p>}
-              </>}
-              {characterTab === "pose" && <>
-                <button type="button" className="floating-option" disabled={modelStatus !== "ready"} onClick={() => { resetReaction(); void selectMotion(null); }}>กลับมาท่ายืนปกติ</button>
-                {!!activeModel?.poses?.length && <><p className="floating-note">ท่าโพส</p><div className="expression-grid">{activeModel.poses.map((pose) => <button type="button" key={pose} disabled={modelStatus !== "ready"} aria-pressed={activeExpressionsModelId === activeModel.id && activeExpressions.includes(pose)} onClick={() => toggleSavedExpression(pose)}>{pose}</button>)}</div></>}
-                {[...new Set(activeModel?.motions.map((motion) => motion.group) ?? [])].map((group) => <div className="model-motion-group" key={group}><p className="floating-note">{group || "ท่าทั่วไป"}</p><div className="expression-grid">{activeModel?.motions.filter((motion) => motion.group === group).map((motion) => <button type="button" key={motion.index} disabled={modelStatus !== "ready"} aria-pressed={activeMotion === `${group}:${motion.index}`} onClick={() => { if (activeMotion === `${group}:${motion.index}`) { resetReaction(); void selectMotion(null); } else void selectMotion(motion); }}>{motion.name}</button>)}</div></div>)}
-                {!activeModel?.motions.length && !activeModel?.poses?.length && <p className="floating-note">{activeModel ? "โมเดลนี้ไม่มีท่าขยับให้กดเล่นเลยอะ" : "ลองลงโมเดลในแท็บ โมเดล ก่อนนะ เดี๋ยวท่าทางจะขึ้นมาให้เลือก"}</p>}
-              </>}
-              {modelNotice && <p className="model-notice" role="alert">{modelNotice}</p>}
             </>}
             {panel === "scenes" && <><SceneManager library={sceneLibrary} cloudAllowed={account ? account.capabilities.canUseCloudScenes : true} onRequestSelected={() => setRequestModalOpen(true)}/><p className="floating-note">ฉากเริ่มต้น</p><div className="scene-grid">{(Object.keys(BACKGROUNDS) as Array<keyof typeof BACKGROUNDS>).map((scene) => <button key={scene} type="button"  className={!activeCustomSceneId && selectedPreset === scene ? "is-selected" : ""} onClick={() => selectPresetScene(scene)}><span style={{ backgroundImage: `url(${BACKGROUNDS[scene]})` }}/><strong>Christmas {scene}</strong></button>)}</div></>}
             {panel === "voice" && (() => {
